@@ -1,0 +1,22 @@
+services:
+  outboxrelay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: outboxrelay-app
+    ports:
+      - "4003:4003"
+    environment:
+      - NODE_ENV=production
+      - PORT=4003
+    volumes:
+      - outboxrelay-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4003/api/health').then(r => r.ok ? process.exit(0) : process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  outboxrelay-data:
