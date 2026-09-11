@@ -12,7 +12,7 @@
 
 ---
 
-## ⚡ 2-Minute Overview
+## ⚡ Overview
 **OutboxRelay** is an enterprise-grade Transactional Outbox Pattern engine and reliable event broker modeled after mission-critical architectures at fintechs and high-scale European unicorns (Wise, Adyen, Bolt, Pipedrive). It solves the classic distributed **Dual-Write Problem**—where database mutations and asynchronous message broker publishes can fail independently, leaving systems in inconsistent states.
 
 ### Core Capabilities
@@ -20,7 +20,7 @@
 2. **Row-Leasing Asynchronous Poller**: Leases pending events using monotonic timestamps (`leased_until = now + 5s`), preventing multiple concurrent worker nodes from redundant processing while automatically reclaiming orphaned events if a worker crashes.
 3. **Resilient Retry & Dead-Letter Queue (DLQ)**: Retries transient network failures using exponential backoff. Poison-pill events that fail 3 times are safely isolated to `DEAD_LETTER` with exact error diagnostics, unblocking the pipeline.
 4. **End-to-End Exactly-Once Business Semantics**: Downstream consumers track event processing via an inbox deduplication ledger (`consumer_inbox`), gracefully filtering out duplicate deliveries caused by network retries.
-5. **Interactive Chaos & Fault Simulator**: Engineer playground to inject broker faults (50% jitter or 100% outage) and observe real-time backoff, row leasing release, and DLQ trapping.
+5. **Interactive Chaos & Fault Simulator**: Operator playground to inject broker faults (50% jitter or 100% outage) and observe real-time backoff, row leasing release, and DLQ trapping.
 6. **Zero External Runtime Dependencies**: Powered by Node.js 24 native SQLite (`DatabaseSync` in WAL mode), offering instant local developer setup without mandatory Docker or external message queues.
 
 ---
@@ -180,4 +180,4 @@ Key architectural decisions are documented under [`docs/adr/`](./docs/adr/):
 ---
 
 ## 📄 License
-MIT License. Built for technical demonstration and high-scale production architectures.
+MIT License.
