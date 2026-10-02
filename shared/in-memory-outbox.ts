@@ -110,11 +110,12 @@ export class InMemoryOutbox implements RelayStore {
   }
 
   getOrders(): Order[] {
-    return [...this.orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 50).map((o) => ({ ...o }));
+    return [...this.orders].reverse().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 50).map((o) => ({ ...o }));
   }
 
   getOutboxEvents(statusFilter?: string): OutboxEvent[] {
-    return this.events
+    return [...this.events]
+      .reverse()
       .filter((e) => !statusFilter || statusFilter === 'ALL' || e.status === statusFilter)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, 100)

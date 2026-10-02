@@ -8,78 +8,47 @@ import type {
   PollCycleResult,
 } from '../../../shared/types.js';
 
-const API_BASE = '/api';
+// BASE_URL is '/' normally; the API always lives at the site root, so only the demo build
+// (which never calls fetch) runs under a sub-path.
+const API_BASE = `${import.meta.env.BASE_URL}api`;
 
-export async function fetchStats(): Promise<OutboxStats> {
-  const res = await fetch(`${API_BASE}/stats`);
-  if (!res.ok) throw new Error(`Failed to fetch stats: ${res.statusText}`);
-  const json = await res.json();
-  return json.data;
-}
-
-export async function fetchOrders(): Promise<Order[]> {
-  const res = await fetch(`${API_BASE}/orders`);
-  if (!res.ok) throw new Error(`Failed to fetch orders: ${res.statusText}`);
-  const json = await res.json();
-  return json.data;
-}
-
-export async function createOrder(payload: CreateOrderPayload): Promise<{ order: Order; event: OutboxEvent }> {
-  const res = await fetch(`${API_BASE}/orders`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+async function request<T>(path: string, init: RequestInit | undefined, label: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, init);
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    const body = await res.json().catch(() => null);
+    throw new Error(body && typeof body.error === 'string' ? body.error : `${label}: ${res.statusText || res.status}`);
   }
   const json = await res.json();
   return json.data;
 }
 
-export async function fetchOutboxEvents(statusFilter?: string): Promise<OutboxEvent[]> {
-  const url = statusFilter && statusFilter !== 'ALL'
-    ? `${API_BASE}/outbox/events?status=${statusFilter}`
-    : `${API_BASE}/outbox/events`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch outbox events: ${res.statusText}`);
-  const json = await res.json();
-  return json.data;
+const jsonPost = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
+export const fetchStats = (): Promise<OutboxStats> => request('/stats', undefined, 'Failed to fetch stats');
+
+export const fetchOrders = (): Promise<Order[]> => request('/orders', undefined, 'Failed to fetch orders');
+
+export const createOrder = (payload: CreateOrderPayload): Promise<{ order: Order; event: OutboxEvent }> =>
+  request('/orders', jsonPost(payload), 'Failed to create order');
+
+export function fetchOutboxEvents(statusFilter?: string): Promise<OutboxEvent[]> {
+  const query = statusFilter && statusFilter !== 'ALL' ? `?status=${encodeURIComponent(statusFilter)}` : '';
+  return request(`/outbox/events${query}`, undefined, 'Failed to fetch outbox events');
 }
 
-export async function triggerPoll(): Promise<PollCycleResult> {
-  const res = await fetch(`${API_BASE}/outbox/poll`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ batchSize: 10, leaseSeconds: 5 }),
-  });
-  if (!res.ok) throw new Error(`Failed to trigger poll: ${res.statusText}`);
-  const json = await res.json();
-  return json.data;
-}
+export const triggerPoll = (): Promise<PollCycleResult> =>
+  request('/outbox/poll', jsonPost({ batchSize: 10, leaseSeconds: 5 }), 'Failed to trigger poll');
 
 export async function retryDeadLetter(eventId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/outbox/events/${encodeURIComponent(eventId)}/retry`, {
-    method: 'POST',
-  });
-  if (!res.ok) throw new Error(`Failed to retry event: ${res.statusText}`);
+  await request(`/outbox/events/${encodeURIComponent(eventId)}/retry`, { method: 'POST' }, 'Failed to retry event');
 }
 
-export async function fetchConsumerInbox(): Promise<ConsumerInboxItem[]> {
-  const res = await fetch(`${API_BASE}/consumer/inbox`);
-  if (!res.ok) throw new Error(`Failed to fetch consumer inbox: ${res.statusText}`);
-  const json = await res.json();
-  return json.data;
-}
+export const fetchConsumerInbox = (): Promise<ConsumerInboxItem[]> =>
+  request('/consumer/inbox', undefined, 'Failed to fetch consumer inbox');
 
-export async function updateBrokerFault(config: Partial<BrokerFaultConfig>): Promise<BrokerFaultConfig> {
-  const res = await fetch(`${API_BASE}/broker/fault-config`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
-  });
-  if (!res.ok) throw new Error(`Failed to update broker fault: ${res.statusText}`);
-  const json = await res.json();
-  return json.data;
-}
+export const updateBrokerFault = (config: Partial<BrokerFaultConfig>): Promise<BrokerFaultConfig> =>
+  request('/broker/fault-config', jsonPost(config), 'Failed to update broker fault');
