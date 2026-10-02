@@ -1,22 +1,24 @@
-# ADR-001: Transactional Outbox Pattern for Dual-Write Atomicity
+# ADR-001: Transactional outbox for the order and event write
 
 ## Status
 Accepted
 
 ## Context
-In microservice and distributed architectures, updating a business entity in a relational database and subsequently publishing a message to a broker (e.g. Kafka, RabbitMQ, AWS SQS) introduces the classic **dual-write problem**. If the database commit succeeds but the message broker network call fails, downstream services miss critical updates. If the broker publish happens first and the database transaction rolls back, downstream services process phantom events.
+Saving an order and then publishing a message to a broker are two writes to two systems. If the database commit succeeds and the publish fails, consumers never hear about the order. If the publish happens first and the commit fails, consumers hear about an order that does not exist.
 
 ## Decision
-We implemented the Transactional Outbox Pattern:
-- Within a single ACID database transaction (`BEGIN IMMEDIATE`), write both the business entity mutation (`orders` table) and an outbox event record (`outbox_events` table).
-- Event state is initially marked as `PENDING`.
-- If either write fails, the entire transaction is rolled back by SQLite WAL, guaranteeing strict atomicity and zero discrepancy.
+Write the business row and an event row to the same database in one transaction:
+- `createOrderWithOutboxEvent` opens `BEGIN IMMEDIATE`, inserts the order into `orders` and the event into `outbox_events` with status `PENDING`, then commits.
+- If either insert throws, the transaction is rolled back and neither row exists.
+- A separate relay reads `PENDING` rows and talks to the broker (see ADR-002).
 
 ## Consequences
 ### Positive
-- Strict atomicity without complex 2-Phase Commit (2PC) or distributed locking.
-- Zero dual-write data loss; events are persisted with database durability guarantees.
-- Works natively with any relational ACID store (SQLite WAL, PostgreSQL).
+- No two-phase commit and no distributed lock: one local transaction covers both rows.
+- An event is never lost because the broker was down at write time; it stays in the table until it is relayed.
+- Works with any store that has transactions; this project uses SQLite in WAL mode.
 
 ### Trade-offs
-- Introduces eventual consistency between database persistence and external broker propagation.
+- Consumers see events after the relay runs, not at commit time, so the system is eventually consistent.
+- The relay can deliver an event more than once (ADR-002), so consumers must tolerate repeats (ADR-003).
+- Orders and events share one SQLite file, so this layout suits a single node; it is not a distributed outbox.

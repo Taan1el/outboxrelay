@@ -11,8 +11,12 @@ const STATUS_FILTERS = ['ALL', 'PENDING', 'LEASED', 'PUBLISHED', 'DEAD_LETTER'];
 
 function fail(res: Response, err: unknown): void {
   const badRequest = err instanceof PollOptionsError || err instanceof ValidationError;
-  const message = err instanceof Error ? err.message : 'Unexpected error';
-  res.status(badRequest ? 400 : 500).json({ success: false, error: message });
+  if (!badRequest) {
+    console.error('[OutboxRelay] Request failed:', err);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+    return;
+  }
+  res.status(400).json({ success: false, error: (err as Error).message });
 }
 
 export class OutboxController {

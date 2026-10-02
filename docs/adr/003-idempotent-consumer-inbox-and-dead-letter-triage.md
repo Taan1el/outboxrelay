@@ -1,21 +1,21 @@
-# ADR-003: Idempotent Consumer Inbox and Dead-Letter Queue (DLQ) Triage
+# ADR-003: Consumer inbox and dead-letter queue
 
 ## Status
 Accepted
 
 ## Context
-Because message transport guarantees across networks are inherently **at-least-once**, network retries and lease expirations can deliver the same outbox event multiple times to downstream consumers. Without deduplication, financial ledgers, inventory counts, and emails would suffer duplicate side-effects. Furthermore, poison-pill events that fail repeatedly must not block the entire event pipeline.
+Because a relay can deliver an event more than once (ADR-002), a consumer that applies every delivery would double its side effects. Separately, an event that keeps failing must stop being retried so that it does not occupy the relay forever.
 
 ## Decision
-We implemented a two-part reliability guarantee:
-1. **Downstream Consumer Inbox**: Consumers maintain a deduplication index tracking `(event_id, consumer_id)`. If an event has already been processed by that specific consumer, duplicate deliveries are acknowledged and safely discarded.
-2. **Dead-Letter Queue (DLQ)**: If an event fails more than `MAX_RETRIES` (3 attempts), it is transitioned to `DEAD_LETTER` with the exact error message stack trace, freeing the queue to process subsequent events. Dead-lettered events can be inspected and manually retried via the management API.
+1. Consumer inbox: `consumer_inbox` has a unique key on `(event_id, consumer_id)`. When a consumer receives an event it already recorded, the repeat is counted in `duplicate_detected` and nothing else happens. The three consumers in this project (notifications, inventory, analytics) are simulated inside the relay process; the inbox shows how a real consumer would deduplicate.
+2. Dead-letter queue: an event that has failed 3 times gets status `DEAD_LETTER` and keeps the last error message. `POST /api/outbox/events/:id/retry` resets its attempt count and puts it back to `PENDING`; the console offers the same as "Replay".
 
 ## Consequences
 ### Positive
-- Delivers **end-to-end exactly-once business semantics** over at-least-once transport.
-- Prevents poison-pill messages from halting production outbox processing pipelines.
-- Clear auditability and recovery mechanisms for failed messages.
+- A repeated delivery does not repeat a consumer's side effect, so the visible effect of at-least-once delivery is the same as processing each event once.
+- A failing event stops consuming retries and stays inspectable, with its last error.
 
 ### Trade-offs
-- Downstream services must allocate storage for the consumer inbox deduplication table.
+- Each consumer needs storage for processed event ids; this project never prunes them.
+- The inbox write and the consumer's own work are only safe if the real consumer commits them in one transaction.
+- Dead-lettered events need a person or a script to replay them.
