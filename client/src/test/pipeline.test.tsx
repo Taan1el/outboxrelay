@@ -25,7 +25,7 @@ describe('Pipeline lanes', () => {
     const events = [1, 2, 3, 4, 5, 6].map(published);
     render(<Pipeline events={events} isPolling={false} onPollNow={() => {}} onReplayed={() => {}} />);
     const lane = screen.getByRole('heading', { name: 'Published' }).closest('section')!;
-    expect(within(lane).getByLabelText('6 rows')).toBeInTheDocument();
+    expect(within(lane).getByText('6 rows')).toBeInTheDocument();
     expect(within(lane).getAllByRole('listitem')).toHaveLength(4);
     expect(within(lane).getAllByRole('listitem')[0]).toHaveTextContent('evt_6');
     await user.click(within(lane).getByRole('button', { name: /Show all 6/ }));

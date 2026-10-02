@@ -71,8 +71,9 @@ export const Pipeline: React.FC<PipelineProps> = ({ events, isPolling, onPollNow
                   <span className={`status-dot ${lane.tone}`} aria-hidden="true" />
                   {lane.title}
                 </h3>
-                <p className="lane-count" aria-label={formatCount(rows.length, 'row')}>
-                  {rows.length}
+                <p className="lane-count">
+                  <span aria-hidden="true">{rows.length}</span>
+                  <span className="sr-only">{formatCount(rows.length, 'row')}</span>
                 </p>
                 <p className="lane-hint">{lane.hint}</p>
               </header>

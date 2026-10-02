@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- New visual identity: a sand-colored page with square corners, amber as the only accent, and Schibsted Grotesk, Instrument Sans and Space Mono as fonts.
+- The outbox is now four side-by-side lanes (pending, leased, published, dead letter) separated by dashed rules, each with a large row count and its newest rows listed inside, replacing the old table, filter buttons and stats strip.
+- The relay cycle button sits at the boundary between the pending and leased lanes, and replay buttons live in the dead-letter lane.
+- Delivery success, orders and rejected duplicates moved to a ledger next to the title; orders and consumers share a column beside the fault simulator.
+
 ## [1.0.0] - 2026-10-02
 
 ### Added

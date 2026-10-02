@@ -111,7 +111,6 @@ describe('OutboxRelay operations console', () => {
   it('sorts outbox rows into four lanes with counts and the next retry time', async () => {
     render(<App />);
     const pending = (await screen.findByRole('heading', { name: 'Pending' })).closest('section')!;
-    expect(within(pending).getByText('1')).toBeInTheDocument();
     expect(within(pending).getByText('evt_retry')).toBeInTheDocument();
     expect(within(pending).getByText(/^retry at \d\d:\d\d:\d\d$/)).toBeInTheDocument();
     expect(within(pending).getByText(/^1 of 3 attempts, created/)).toBeInTheDocument();
@@ -119,8 +118,8 @@ describe('OutboxRelay operations console', () => {
     expect(within(published).getByText('evt_pub')).toBeInTheDocument();
     const leased = screen.getByRole('heading', { name: 'Leased' }).closest('section')!;
     expect(within(leased).getByText('Nothing is leased.')).toBeInTheDocument();
-    expect(within(leased).getByLabelText('0 rows')).toBeInTheDocument();
-    expect(within(pending).getByLabelText('1 row')).toBeInTheDocument();
+    expect(within(leased).getByText('0 rows')).toBeInTheDocument();
+    expect(within(pending).getByText('1 row')).toBeInTheDocument();
   });
 
   it('expands a row to show its payload and last error', async () => {

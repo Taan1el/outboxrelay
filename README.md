@@ -1,6 +1,6 @@
 # OutboxRelay
 
-OutboxRelay is a transactional outbox relay. It saves an order and its event in one database transaction, then a poller leases the pending events, hands them to a (simulated) message broker, retries failures with backoff, and moves events that keep failing to a dead-letter queue. A React console shows the outbox rows, the consumers, the dead-letter queue and a fault simulator for the broker.
+OutboxRelay is a transactional outbox relay. It saves an order and its event in one database transaction, then a poller leases the pending events, hands them to a (simulated) message broker, retries failures with backoff, and moves events that keep failing to a dead-letter queue. A React console sorts the outbox rows into four lanes (pending, leased, published, dead letter) with a button to run a relay cycle at the boundary between the first two, and shows the consumers, an order form and a fault simulator for the broker.
 
 It is meant for developers who want to see how the outbox pattern behaves, including what happens when the broker fails, a lease expires or a consumer sees the same event twice.
 
@@ -14,9 +14,9 @@ The demo runs entirely in your browser. The same relay, backoff and validation c
 
 ## Screenshots
 
-![Stats strip and the outbox table](docs/screenshots/01-dashboard.png)
+![Four pipeline lanes: pending, leased, published and dead letter](docs/screenshots/01-dashboard.png)
 
-More screenshots: [consumers and the dead-letter queue](docs/screenshots/02-consumers-and-dead-letters.png), [the fault simulator after a full outage](docs/screenshots/03-fault-simulator.png), [the console at phone width](docs/screenshots/04-mobile.png).
+More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/02-consumers-and-dead-letters.png), [the fault simulator after a full outage](docs/screenshots/03-fault-simulator.png), [the console at phone width](docs/screenshots/04-mobile.png).
 
 ## Features
 
@@ -141,7 +141,7 @@ npm test
 ```
 
 - **Server** (Vitest and Supertest): routes and validation, transaction rollback, leasing and lease expiry, backoff timing, dead-lettering and replay, the consumer inbox, a migration from a database without `available_at`, the background poller, path resolution, and parity between the SQLite and in-memory stores.
-- **Client** (Vitest and React Testing Library): the stats strip, the outbox table and its filter, the dead-letter replay, the order form, the fault simulator, error handling, the refresh timer, the browser demo API and the demo bar.
+- **Client** (Vitest and React Testing Library): the tally, the four lanes with their row counts, the show-all toggle, the dead-letter replay, the order form, the fault simulator, error handling, the refresh timer, the browser demo API and the demo bar.
 
 Tests that depend on time use fake timers; none of them sleep.
 
