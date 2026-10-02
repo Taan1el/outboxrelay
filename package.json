@@ -1,9 +1,22 @@
 {
   "name": "outboxrelay",
   "version": "1.0.0",
-  "description": "Transactional Outbox Pattern, Atomicity Dual-Write Engine & Exactly-Once Event Broker",
+  "description": "Transactional outbox relay with row leasing, retries with backoff and a dead-letter queue",
   "private": true,
   "type": "module",
+  "author": "Taaniel Vananurm",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Taan1el/outboxrelay.git"
+  },
+  "homepage": "https://taan1el.github.io/outboxrelay/",
+  "bugs": {
+    "url": "https://github.com/Taan1el/outboxrelay/issues"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "workspaces": [
     "server",
     "client"
@@ -18,18 +31,17 @@
     "test:client": "npm run test --workspace=client",
     "lint": "npm run lint:server && npm run lint:client",
     "lint:server": "npm run lint --workspace=server",
-    "lint:client": "npm run lint --workspace=client"
+    "lint:client": "npm run lint --workspace=client",
+    "build:pages": "npm run build:pages --workspace=client"
   },
   "keywords": [
     "transactional-outbox",
-    "dual-write-problem",
     "event-driven-architecture",
-    "message-broker",
-    "change-data-capture",
+    "message-relay",
+    "dead-letter-queue",
+    "sqlite",
+    "row-leasing",
     "idempotent-consumer",
-    "sqlite-wal",
-    "react19"
-  ],
-  "author": "Taaneiel",
-  "license": "MIT"
+    "react"
+  ]
 }

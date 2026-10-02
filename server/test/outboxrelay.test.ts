@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import { OutboxDatabase } from '../src/db/database.js';
 import { OutboxService } from '../src/services/outbox.service.js';
@@ -36,6 +36,7 @@ describe('OutboxDatabase & ACID Dual-Write Engine', () => {
       status: 'PENDING' as const,
       retryCount: 0,
       leasedUntil: null,
+        availableAt: null,
       createdAt: new Date().toISOString(),
       publishedAt: null,
       errorMessage: null,
@@ -161,10 +162,16 @@ describe('OutboxRelay Service & REST API', () => {
 
     const eventId = orderRes.body.data.event.id;
 
-    // Poll 3 times to trigger 3 failures and dead-letter transition
-    await request(app).post('/api/outbox/poll').send({ batchSize: 5 });
-    await request(app).post('/api/outbox/poll').send({ batchSize: 5 });
-    await request(app).post('/api/outbox/poll').send({ batchSize: 5 });
+    // Retries are delayed by backoff, so move the clock past each delay between polls.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await request(app).post('/api/outbox/poll').send({ batchSize: 5 });
+        vi.setSystemTime(Date.now() + 10_000);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
 
     const eventsRes = await request(app).get('/api/outbox/events?status=DEAD_LETTER');
     expect(eventsRes.body.data.some((e: any) => e.id === eventId)).toBe(true);

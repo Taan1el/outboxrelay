@@ -1,13 +1,15 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
-import type { Order, OutboxEvent, OutboxStats } from '../../../shared/types.js';
+import type { ConsumerInboxItem, ConsumerStats, Order, OutboxEvent, OutboxStats } from '../../../shared/types.js';
+import { CONSUMER_IDS, MAX_ATTEMPTS, deliverySuccessRate, planFailure } from '../../../shared/outbox-logic.js';
+import { defaultDatabasePath } from '../lib/repoPaths.js';
 
 export class OutboxDatabase {
   private db: DatabaseSync;
 
   constructor(dbPath?: string) {
-    const finalPath = dbPath || path.resolve(process.cwd(), 'data', 'outbox.db');
+    const finalPath = dbPath || defaultDatabasePath();
     const dir = path.dirname(finalPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -43,6 +45,7 @@ export class OutboxDatabase {
         status TEXT NOT NULL,
         retry_count INTEGER NOT NULL DEFAULT 0,
         leased_until INTEGER,
+        available_at INTEGER,
         created_at TEXT NOT NULL,
         published_at TEXT,
         error_message TEXT
@@ -60,6 +63,12 @@ export class OutboxDatabase {
         UNIQUE(event_id, consumer_id)
       );
     `);
+
+    // Databases created before retry backoff existed lack the available_at column.
+    const columns = this.db.prepare('PRAGMA table_info(outbox_events)').all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === 'available_at')) {
+      this.db.exec('ALTER TABLE outbox_events ADD COLUMN available_at INTEGER;');
+    }
   }
 
   private seedSampleData(): void {
@@ -87,6 +96,7 @@ export class OutboxDatabase {
             status: 'PUBLISHED',
             retryCount: 0,
             leasedUntil: null,
+            availableAt: null,
             createdAt: new Date(Date.now() - 3600000).toISOString(),
             publishedAt: new Date(Date.now() - 3590000).toISOString(),
             errorMessage: null,
@@ -112,6 +122,7 @@ export class OutboxDatabase {
             status: 'PENDING',
             retryCount: 0,
             leasedUntil: null,
+            availableAt: null,
             createdAt: new Date(Date.now() - 600000).toISOString(),
             publishedAt: null,
             errorMessage: null,
@@ -152,8 +163,8 @@ export class OutboxDatabase {
       );
 
       const outboxStmt = this.db.prepare(`
-        INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload_json, status, retry_count, leased_until, created_at, published_at, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload_json, status, retry_count, leased_until, available_at, created_at, published_at, error_message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       outboxStmt.run(
         event.id,
@@ -164,6 +175,7 @@ export class OutboxDatabase {
         event.status,
         event.retryCount,
         event.leasedUntil,
+        event.availableAt,
         event.createdAt,
         event.publishedAt,
         event.errorMessage
@@ -185,11 +197,12 @@ export class OutboxDatabase {
     try {
       const selectStmt = this.db.prepare(`
         SELECT * FROM outbox_events
-        WHERE status = 'PENDING' OR (status = 'LEASED' AND leased_until IS NOT NULL AND leased_until < ?)
+        WHERE (status = 'PENDING' AND (available_at IS NULL OR available_at <= ?))
+           OR (status = 'LEASED' AND leased_until IS NOT NULL AND leased_until < ?)
         ORDER BY created_at ASC
         LIMIT ?
       `);
-      const rows = selectStmt.all(now, limit) as any[];
+      const rows = selectStmt.all(now, now, limit) as any[];
 
       if (rows.length === 0) {
         this.db.exec('COMMIT;');
@@ -215,6 +228,7 @@ export class OutboxDatabase {
           status: 'LEASED',
           retryCount: row.retry_count,
           leasedUntil: leaseExpiration,
+          availableAt: row.available_at ?? null,
           createdAt: row.created_at,
           publishedAt: row.published_at,
           errorMessage: row.error_message,
@@ -233,39 +247,27 @@ export class OutboxDatabase {
     const now = new Date().toISOString();
     const stmt = this.db.prepare(`
       UPDATE outbox_events
-      SET status = 'PUBLISHED', published_at = ?, leased_until = NULL, error_message = NULL
+      SET status = 'PUBLISHED', published_at = ?, leased_until = NULL, available_at = NULL, error_message = NULL
       WHERE id = ?
     `);
     stmt.run(now, eventId);
   }
 
-  public markEventFailed(eventId: string, errorMessage: string, maxRetries: number = 3): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
+  public markEventFailed(eventId: string, errorMessage: string, maxRetries: number = MAX_ATTEMPTS): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
     const eventRow = this.db.prepare('SELECT retry_count FROM outbox_events WHERE id = ?').get(eventId) as { retry_count: number } | undefined;
-    const currentRetries = eventRow ? eventRow.retry_count + 1 : 1;
-
-    if (currentRetries >= maxRetries) {
-      const stmt = this.db.prepare(`
-        UPDATE outbox_events
-        SET status = 'DEAD_LETTER', retry_count = ?, leased_until = NULL, error_message = ?
-        WHERE id = ?
-      `);
-      stmt.run(currentRetries, errorMessage, eventId);
-      return { status: 'DEAD_LETTER', retries: currentRetries };
-    } else {
-      const stmt = this.db.prepare(`
-        UPDATE outbox_events
-        SET status = 'PENDING', retry_count = ?, leased_until = NULL, error_message = ?
-        WHERE id = ?
-      `);
-      stmt.run(currentRetries, errorMessage, eventId);
-      return { status: 'PENDING', retries: currentRetries };
-    }
+    const plan = planFailure(eventRow ? eventRow.retry_count : 0, Date.now(), maxRetries);
+    this.db.prepare(`
+      UPDATE outbox_events
+      SET status = ?, retry_count = ?, leased_until = NULL, available_at = ?, error_message = ?
+      WHERE id = ?
+    `).run(plan.status, plan.retryCount, plan.availableAt, errorMessage, eventId);
+    return { status: plan.status, retries: plan.retryCount };
   }
 
   public retryDeadLetterEvent(eventId: string): boolean {
     const stmt = this.db.prepare(`
       UPDATE outbox_events
-      SET status = 'PENDING', retry_count = 0, leased_until = NULL, error_message = NULL
+      SET status = 'PENDING', retry_count = 0, leased_until = NULL, available_at = NULL, error_message = NULL
       WHERE id = ? AND status = 'DEAD_LETTER'
     `);
     const res = stmt.run(eventId);
@@ -333,15 +335,24 @@ export class OutboxDatabase {
       status: r.status,
       retryCount: r.retry_count,
       leasedUntil: r.leased_until,
+      availableAt: r.available_at ?? null,
       createdAt: r.created_at,
       publishedAt: r.published_at,
       errorMessage: r.error_message,
     }));
   }
 
-  public getConsumerInbox(): any[] {
-    const stmt = this.db.prepare('SELECT * FROM consumer_inbox ORDER BY processed_at DESC LIMIT 50');
-    return stmt.all() as any[];
+  public getConsumerInbox(): ConsumerInboxItem[] {
+    const stmt = this.db.prepare('SELECT * FROM consumer_inbox ORDER BY processed_at DESC, rowid DESC LIMIT 50');
+    const rows = stmt.all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      eventId: r.event_id,
+      consumerId: r.consumer_id,
+      eventType: r.event_type,
+      processedAt: r.processed_at,
+      duplicateDetected: r.duplicate_detected > 0,
+    }));
   }
 
   public getStats(): Omit<OutboxStats, 'brokerMode'> {
@@ -355,8 +366,18 @@ export class OutboxDatabase {
     const consumerProcessed = (this.db.prepare('SELECT COUNT(*) as cnt FROM consumer_inbox').get() as any).cnt;
     const consumerDuplicates = (this.db.prepare('SELECT COALESCE(SUM(duplicate_detected), 0) as cnt FROM consumer_inbox').get() as any).cnt;
 
-    const completed = publishedEvents + deadLetterEvents;
-    const deliverySuccessRate = completed > 0 ? Number(((publishedEvents / completed) * 100).toFixed(1)) : 100;
+    const consumerRows = this.db.prepare(
+      'SELECT consumer_id, COUNT(*) AS processed, COALESCE(SUM(duplicate_detected), 0) AS duplicates, MAX(processed_at) AS last_at FROM consumer_inbox GROUP BY consumer_id'
+    ).all() as Array<{ consumer_id: string; processed: number; duplicates: number; last_at: string | null }>;
+    const consumers: ConsumerStats[] = CONSUMER_IDS.map((consumerId) => {
+      const row = consumerRows.find((r) => r.consumer_id === consumerId);
+      return {
+        consumerId,
+        processed: row ? row.processed : 0,
+        duplicatesRejected: row ? row.duplicates : 0,
+        lastProcessedAt: row ? row.last_at : null,
+      };
+    });
 
     return {
       totalEvents,
@@ -367,7 +388,8 @@ export class OutboxDatabase {
       totalOrders,
       consumerProcessed,
       consumerDuplicatesRejected: consumerDuplicates,
-      deliverySuccessRate,
+      deliverySuccessRate: deliverySuccessRate(publishedEvents, deadLetterEvents),
+      consumers,
     };
   }
 

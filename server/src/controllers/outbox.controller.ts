@@ -1,49 +1,58 @@
 import type { Request, Response } from 'express';
-import { OutboxService, PollOptionsError } from '../services/outbox.service.js';
+import { OutboxService } from '../services/outbox.service.js';
+import {
+  PollOptionsError,
+  ValidationError,
+  validateFaultConfig,
+  validateOrderPayload,
+} from '../../../shared/outbox-logic.js';
+
+const STATUS_FILTERS = ['ALL', 'PENDING', 'LEASED', 'PUBLISHED', 'DEAD_LETTER'];
+
+function fail(res: Response, err: unknown): void {
+  const badRequest = err instanceof PollOptionsError || err instanceof ValidationError;
+  const message = err instanceof Error ? err.message : 'Unexpected error';
+  res.status(badRequest ? 400 : 500).json({ success: false, error: message });
+}
 
 export class OutboxController {
   constructor(private outboxService: OutboxService) {}
 
   public getStats = async (_req: Request, res: Response) => {
     try {
-      const stats = this.outboxService.getStats();
-      res.json({ success: true, data: stats });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.json({ success: true, data: this.outboxService.getStats() });
+    } catch (err) {
+      fail(res, err);
     }
   };
 
   public getOrders = async (_req: Request, res: Response) => {
     try {
-      const orders = this.outboxService.getOrders();
-      res.json({ success: true, data: orders });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.json({ success: true, data: this.outboxService.getOrders() });
+    } catch (err) {
+      fail(res, err);
     }
   };
 
   public createOrder = async (req: Request, res: Response) => {
     try {
-      const { customerId, items, currency } = req.body;
-      if (!customerId || !items || !Array.isArray(items) || items.length === 0) {
-        res.status(400).json({ success: false, error: 'customerId and non-empty items array are required' });
-        return;
-      }
-
-      const result = this.outboxService.createOrder({ customerId, items, currency });
+      const payload = validateOrderPayload(req.body);
+      const result = this.outboxService.createOrder(payload);
       res.status(201).json({ success: true, data: result });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+    } catch (err) {
+      fail(res, err);
     }
   };
 
   public getOutboxEvents = async (req: Request, res: Response) => {
     try {
-      const status = req.query.status as string | undefined;
-      const events = this.outboxService.getOutboxEvents(status);
-      res.json({ success: true, data: events });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      const status = req.query.status;
+      if (status !== undefined && (typeof status !== 'string' || !STATUS_FILTERS.includes(status))) {
+        throw new ValidationError(`status must be one of ${STATUS_FILTERS.join(', ')}`);
+      }
+      res.json({ success: true, data: this.outboxService.getOutboxEvents(status) });
+    } catch (err) {
+      fail(res, err);
     }
   };
 
@@ -56,8 +65,8 @@ export class OutboxController {
       const { batchSize, leaseSeconds } = body;
       const result = await this.outboxService.pollAndRelay(batchSize, leaseSeconds);
       res.json({ success: true, data: result });
-    } catch (err: any) {
-      res.status(err instanceof PollOptionsError ? 400 : 500).json({ success: false, error: err.message });
+    } catch (err) {
+      fail(res, err);
     }
   };
 
@@ -65,32 +74,30 @@ export class OutboxController {
     try {
       const rawId = req.params.id;
       const eventId = Array.isArray(rawId) ? rawId[0] : String(rawId);
-      const retried = this.outboxService.retryDeadLetterEvent(eventId);
-      if (!retried) {
+      if (!this.outboxService.retryDeadLetterEvent(eventId)) {
         res.status(404).json({ success: false, error: `Event '${eventId}' not found in DEAD_LETTER status` });
         return;
       }
       res.json({ success: true, message: `Event ${eventId} reset to PENDING for retry` });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+    } catch (err) {
+      fail(res, err);
     }
   };
 
   public getConsumerInbox = async (_req: Request, res: Response) => {
     try {
-      const inbox = this.outboxService.getConsumerInbox();
-      res.json({ success: true, data: inbox });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.json({ success: true, data: this.outboxService.getConsumerInbox() });
+    } catch (err) {
+      fail(res, err);
     }
   };
 
   public setBrokerFaultConfig = async (req: Request, res: Response) => {
     try {
-      const updated = this.outboxService.setBrokerFaultConfig(req.body);
-      res.json({ success: true, data: updated });
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      const patch = validateFaultConfig(req.body);
+      res.json({ success: true, data: this.outboxService.setBrokerFaultConfig(patch) });
+    } catch (err) {
+      fail(res, err);
     }
   };
 }

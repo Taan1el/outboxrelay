@@ -9,6 +9,8 @@ export interface OutboxEvent {
   status: OutboxEventStatus;
   retryCount: number;
   leasedUntil: number | null;
+  /** Earliest time (epoch ms) a retried event may be leased again; null when no backoff applies. */
+  availableAt: number | null;
   createdAt: string;
   publishedAt: string | null;
   errorMessage: string | null;
@@ -46,6 +48,13 @@ export interface BrokerFaultConfig {
   simulatedLatencyMs: number;
 }
 
+export interface ConsumerStats {
+  consumerId: string;
+  processed: number;
+  duplicatesRejected: number;
+  lastProcessedAt: string | null;
+}
+
 export interface OutboxStats {
   totalEvents: number;
   pendingEvents: number;
@@ -56,6 +65,7 @@ export interface OutboxStats {
   consumerProcessed: number;
   consumerDuplicatesRejected: number;
   deliverySuccessRate: number;
+  consumers: ConsumerStats[];
   brokerMode: 'HEALTHY' | 'PARTIAL_FAILURES' | 'FULL_OUTAGE';
 }
 

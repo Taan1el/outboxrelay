@@ -1,7 +1,16 @@
 node_modules
 dist
 .env
-data/*.db*
+.env.*
+!.env.example
+# SQLite database and its WAL files, wherever the server is started from
+data/
+*.db
+*.db-*
+*.sqlite*
 coverage
+playwright-report
+test-results
 *.log
 .DS_Store
+Thumbs.db

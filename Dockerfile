@@ -1,4 +1,4 @@
-# Multi-stage Docker build for OutboxRelay Event Broker
+# Multi-stage Docker build for OutboxRelay
 FROM node:24-alpine AS base
 WORKDIR /app
 
@@ -23,10 +23,14 @@ ENV PORT=4003
 COPY package.json ./
 COPY server/package.json ./server/
 COPY --from=builder /app/node_modules ./node_modules
+# tsc compiles shared/ into server/dist/shared, so the shared sources are not copied.
 COPY --from=builder /app/server/dist ./server/dist
-COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/client/dist ./client/dist
+
+# The SQLite file lives in /app/data (mount a volume there); the unprivileged node user must own it.
+RUN mkdir -p /app/data && chown -R node:node /app/data
+USER node
 
 EXPOSE 4003
 
-CMD ["node", "server/dist/index.js"]
+CMD ["node", "server/dist/server/src/index.js"]
