@@ -8,6 +8,8 @@ import type {
   PollCycleResult,
 } from '../../../shared/types.js';
 
+export class PollOptionsError extends Error {}
+
 export class OutboxService {
   private db: OutboxDatabase;
   private brokerFaultConfig: BrokerFaultConfig = {
@@ -99,6 +101,12 @@ export class OutboxService {
    * updates status, and delivers to downstream consumers with idempotency tracking.
    */
   public async pollAndRelay(batchSize: number = 10, leaseDurationSeconds: number = 5): Promise<PollCycleResult> {
+    if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) {
+      throw new PollOptionsError('batchSize must be an integer between 1 and 100');
+    }
+    if (!Number.isInteger(leaseDurationSeconds) || leaseDurationSeconds < 1 || leaseDurationSeconds > 300) {
+      throw new PollOptionsError('leaseSeconds must be an integer between 1 and 300');
+    }
     const start = performance.now();
     const leasedEvents = this.db.leasePendingEvents(leaseDurationSeconds, batchSize);
 

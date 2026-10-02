@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { OutboxService } from '../services/outbox.service.js';
+import { OutboxService, PollOptionsError } from '../services/outbox.service.js';
 
 export class OutboxController {
   constructor(private outboxService: OutboxService) {}
@@ -49,12 +49,15 @@ export class OutboxController {
 
   public triggerPoll = async (req: Request, res: Response) => {
     try {
-      const batchSize = req.body.batchSize ? parseInt(req.body.batchSize, 10) : 10;
-      const leaseSeconds = req.body.leaseSeconds ? parseInt(req.body.leaseSeconds, 10) : 5;
+      const body = req.body === undefined ? {} : req.body;
+      if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+        throw new PollOptionsError('Polling options must be a JSON object');
+      }
+      const { batchSize, leaseSeconds } = body;
       const result = await this.outboxService.pollAndRelay(batchSize, leaseSeconds);
       res.json({ success: true, data: result });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.status(err instanceof PollOptionsError ? 400 : 500).json({ success: false, error: err.message });
     }
   };
 

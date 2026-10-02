@@ -118,6 +118,12 @@ Result: 100% guaranteed persistence.
 | `GET` | `/api/consumer/inbox` | Audit log of downstream consumer dispatches and deduplication |
 | `POST` | `/api/broker/fault-config` | Inject broker chaos (`HEALTHY`, `PARTIAL_FAILURES`, `FULL_OUTAGE`) |
 
+Manual polling accepts a JSON object with optional `batchSize` (integer 1–100,
+default 10) and `leaseSeconds` (integer 1–300, default 5). Omitted options use
+their defaults. Strings, null, booleans, fractions, and out-of-range values return
+HTTP 400 before any events are leased or dispatched. For example:
+`{"batchSize": 20, "leaseSeconds": 30}`.
+
 ---
 
 ## 💻 Quickstart Guide (Zero-Config)
