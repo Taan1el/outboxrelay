@@ -3,11 +3,9 @@ import type { OutboxStats, Order, OutboxEvent, PollCycleResult } from '../../sha
 import { fetchStats, fetchOrders, fetchOutboxEvents, triggerPoll } from './services/index.js';
 import { DemoBanner } from './components/DemoBanner.js';
 import { Header } from './components/Header.js';
-import { StatsBar } from './components/StatsBar.js';
-import { OutboxTable, type StatusFilter } from './components/OutboxTable.js';
+import { Pipeline } from './components/Pipeline.js';
 import { OrdersPanel } from './components/OrdersPanel.js';
 import { ConsumerFleet } from './components/ConsumerFleet.js';
-import { DeadLetterQueue } from './components/DeadLetterQueue.js';
 import { FaultSimulator } from './components/FaultSimulator.js';
 import './App.css';
 
@@ -17,8 +15,6 @@ export const App: React.FC = () => {
   const [stats, setStats] = useState<OutboxStats | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [events, setEvents] = useState<OutboxEvent[]>([]);
-  const [deadLetters, setDeadLetters] = useState<OutboxEvent[]>([]);
-  const [activeFilter, setActiveFilter] = useState<StatusFilter>('ALL');
   const [lastCycle, setLastCycle] = useState<PollCycleResult | null>(null);
   const [isPolling, setIsPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,16 +22,14 @@ export const App: React.FC = () => {
 
   const loadData = useCallback(async () => {
     try {
-      const [statsData, ordersData, eventsData, deadData] = await Promise.all([
+      const [statsData, ordersData, eventsData] = await Promise.all([
         fetchStats(),
         fetchOrders(),
         fetchOutboxEvents('ALL'),
-        fetchOutboxEvents('DEAD_LETTER'),
       ]);
       setStats(statsData);
       setOrders(ordersData);
       setEvents(eventsData);
-      setDeadLetters(deadData);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -66,7 +60,7 @@ export const App: React.FC = () => {
   return (
     <div className="app-container">
       <DemoBanner onReset={() => void loadData()} />
-      <Header brokerMode={stats?.brokerMode ?? 'HEALTHY'} onPollNow={handleManualPoll} onRefresh={() => void loadData()} isPolling={isPolling} />
+      <Header stats={stats} brokerMode={stats?.brokerMode ?? 'HEALTHY'} onRefresh={() => void loadData()} />
 
       <main className="app-main">
         {(error || pollError) && (
@@ -80,21 +74,20 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        <StatsBar stats={stats} />
-        <OutboxTable events={events} activeFilter={activeFilter} onFilterChange={setActiveFilter} />
-        <OrdersPanel orders={orders} onOrderCreated={() => void loadData()} />
+        <Pipeline events={events} isPolling={isPolling} onPollNow={handleManualPoll} onReplayed={() => void loadData()} />
 
-        <div className="two-column">
-          <ConsumerFleet consumers={stats?.consumers ?? []} />
-          <DeadLetterQueue events={deadLetters} onReplayed={() => void loadData()} />
+        <div className="below">
+          <div className="below-col">
+            <OrdersPanel orders={orders} onOrderCreated={() => void loadData()} />
+            <ConsumerFleet consumers={stats?.consumers ?? []} />
+          </div>
+          <FaultSimulator
+            currentMode={stats?.brokerMode ?? 'HEALTHY'}
+            lastCycle={lastCycle}
+            retrying={retrying}
+            onConfigChanged={() => void loadData()}
+          />
         </div>
-
-        <FaultSimulator
-          currentMode={stats?.brokerMode ?? 'HEALTHY'}
-          lastCycle={lastCycle}
-          retrying={retrying}
-          onConfigChanged={() => void loadData()}
-        />
       </main>
 
       <footer className="app-footer">

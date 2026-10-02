@@ -97,46 +97,36 @@ describe('OutboxRelay operations console', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows the product name, broker state and the statistics strip', async () => {
+  it('shows the product name, broker state and the tally', async () => {
     render(<App />);
     expect(screen.getByRole('heading', { level: 1, name: 'OutboxRelay' })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('98.3%')).toBeInTheDocument());
     expect(screen.getByText('115 published, 2 dead-lettered')).toBeInTheDocument();
-    expect(screen.getByText('1 leased')).toBeInTheDocument();
     expect(screen.getByText('120 outbox rows')).toBeInTheDocument();
     expect(screen.getByText('345 deliveries')).toBeInTheDocument();
     expect(screen.getByText(/Broker healthy/)).toBeInTheDocument();
     expect(screen.getByRole('meter', { name: 'Delivery success' })).toHaveAttribute('aria-valuenow', '98.3');
   });
 
-  it('lists outbox rows with a status label and the next retry time', async () => {
+  it('sorts outbox rows into four lanes with counts and the next retry time', async () => {
     render(<App />);
-    const table = await screen.findByRole('table', { name: '3 outbox rows' });
-    const rows = within(table).getAllByRole('row');
-    expect(rows).toHaveLength(4);
-    expect(within(rows[1]).getByText('Published')).toBeInTheDocument();
-    expect(within(rows[3]).getByText('Pending')).toBeInTheDocument();
-    expect(within(rows[3]).getByText(/^retry at \d\d:\d\d:\d\d$/)).toBeInTheDocument();
-    expect(within(rows[3]).getByText('1 of 3')).toBeInTheDocument();
-  });
-
-  it('filters rows by status without another request', async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    await screen.findByRole('table', { name: '3 outbox rows' });
-    const before = calls.length;
-    await user.click(screen.getByRole('button', { name: 'Dead letter' }));
-    expect(screen.getByRole('table', { name: '1 outbox row' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Dead letter' })).toHaveAttribute('aria-pressed', 'true');
-    await user.click(screen.getByRole('button', { name: 'Leased' }));
-    expect(screen.getByText('No outbox rows with this status.')).toBeInTheDocument();
-    expect(calls.length).toBe(before);
+    const pending = (await screen.findByRole('heading', { name: 'Pending' })).closest('section')!;
+    expect(within(pending).getByText('1')).toBeInTheDocument();
+    expect(within(pending).getByText('evt_retry')).toBeInTheDocument();
+    expect(within(pending).getByText(/^retry at \d\d:\d\d:\d\d$/)).toBeInTheDocument();
+    expect(within(pending).getByText(/^1 of 3 attempts, created/)).toBeInTheDocument();
+    const published = screen.getByRole('heading', { name: 'Published' }).closest('section')!;
+    expect(within(published).getByText('evt_pub')).toBeInTheDocument();
+    const leased = screen.getByRole('heading', { name: 'Leased' }).closest('section')!;
+    expect(within(leased).getByText('Nothing is leased.')).toBeInTheDocument();
+    expect(within(leased).getByLabelText('0 rows')).toBeInTheDocument();
+    expect(within(pending).getByLabelText('1 row')).toBeInTheDocument();
   });
 
   it('expands a row to show its payload and last error', async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByRole('table', { name: '3 outbox rows' });
+    await screen.findByRole('button', { name: 'Show payload for evt_dead' });
     await user.click(screen.getByRole('button', { name: 'Show payload for evt_dead' }));
     expect(screen.getByText('Last error: Connection refused')).toBeInTheDocument();
     expect(screen.getByText(/"totalEur": 250/)).toBeInTheDocument();
@@ -156,7 +146,7 @@ describe('OutboxRelay operations console', () => {
   it('replays a dead-lettered event through the retry endpoint', async () => {
     const user = userEvent.setup();
     render(<App />);
-    const section = (await screen.findByRole('heading', { name: 'Dead-letter queue' })).closest('section')!;
+    const section = (await screen.findByRole('heading', { name: 'Dead letter' })).closest('section')!;
     expect(await within(section).findByText('Connection refused')).toBeInTheDocument();
     await user.click(within(section).getByRole('button', { name: /Replay/ }));
     await waitFor(() => expect(calledWith('POST', '/outbox/events/evt_dead/retry')).toHaveLength(1));

@@ -1,20 +1,20 @@
 :root {
-  --paper: #faf9f6;        /* page background */
-  --surface: #ffffff;      /* panels, tables */
-  --ink: #17160f;          /* primary text */
-  --ink-2: #57544b;        /* secondary text */
-  --ink-3: #8a867b;        /* tertiary text, placeholders */
-  --rule: #e3e0d7;         /* borders and dividers */
-  --rule-strong: #cfcabd;  /* input borders, table header rule */
-  --accent: #8a4b08;       /* outboxrelay: relay, parcels */
-  --accent-ink: #ffffff;   /* text on accent fills */
-  --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--surface));
-  /* status colors are data, not decoration: use only for status text, dots, small badges and meter fills */
-  --ok: #1f7a4d;
-  --warn: #a15c00;
+  --paper: #f4eee3;        /* page background, sand */
+  --surface: #fcf9f3;      /* lanes and panels */
+  --ink: #251c10;          /* primary text */
+  --ink-2: #54482f;        /* secondary text */
+  --ink-3: #6e6149;        /* tertiary text */
+  --rule: #d6cbb6;         /* solid and dashed dividers */
+  --rule-strong: #8c7e63;  /* input borders, section rules */
+  --accent: #8a4b08;       /* relay amber */
+  --accent-ink: #fffaf1;   /* text on accent fills */
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  /* status colors are data, not decoration: status text, dots and meter fills only */
+  --ok: #1f6b43;
+  --warn: #8a5200;
   --bad: #b3261e;
-  --radius: 6px;
-  --font-heading: "Sora Variable", "Sora", ui-sans-serif, system-ui, sans-serif;
-  --font-body: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SFMono-Regular", monospace;
+  --radius: 0;
+  --font-heading: "Schibsted Grotesk Variable", "Schibsted Grotesk", ui-sans-serif, sans-serif;
+  --font-body: "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, "SFMono-Regular", monospace;
 }
