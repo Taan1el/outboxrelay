@@ -46,3 +46,21 @@ jobs:
 
       - name: Build container image
         run: docker build -t outboxrelay:ci .
+      - name: Run the container and check the UI
+        run: |
+          docker run -d --name outboxrelay -p 127.0.0.1:4003:4003 outboxrelay:ci
+          ok=0
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:4003/ -o index.html; then ok=1; break; fi
+            sleep 2
+          done
+          test "$ok" = "1"
+          grep -qi '<div id="root"' index.html
+          healthy=0
+          for p in /health /api/health /healthz; do
+            if curl -fsS http://127.0.0.1:4003$p > /dev/null; then echo "health ok at $p"; healthy=1; break; fi
+          done
+          test "$healthy" = "1"
+      - name: Container logs
+        if: always()
+        run: docker logs outboxrelay || true
