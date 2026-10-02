@@ -170,7 +170,10 @@ textarea {
 .status-dot.ok { background-color: var(--ok); }
 .status-dot.warn { background-color: var(--warn); }
 .status-dot.bad { background-color: var(--bad); }
-.status-dot.idle { background-color: var(--ink-3); }
+.status-dot.idle {
+  background-color: transparent;
+  border: 1.5px solid var(--ink-2);
+}
 
 /* Main */
 .app-main {
@@ -294,8 +297,8 @@ textarea {
 
 .stat-meter {
   width: 100%;
-  height: 4px;
-  background-color: var(--rule);
+  height: 6px;
+  border: 1px solid var(--rule-strong);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -345,7 +348,7 @@ textarea {
 .btn-secondary {
   background-color: var(--surface);
   color: var(--ink);
-  border-color: var(--rule-strong);
+  border-color: var(--ink-3);
 }
 
 .btn-secondary:hover:not(:disabled) {
@@ -363,7 +366,7 @@ textarea {
   justify-content: center;
   width: 44px;
   height: 44px;
-  border: 1px solid var(--rule-strong);
+  border: 1px solid var(--ink-3);
   border-radius: var(--radius);
   background-color: var(--surface);
   color: var(--ink-2);
@@ -388,7 +391,7 @@ textarea {
 .filter-btn {
   min-height: 44px;
   padding: 0 0.9rem;
-  border: 1px solid var(--rule-strong);
+  border: 1px solid var(--ink-3);
   border-radius: var(--radius);
   background-color: var(--surface);
   font-size: 14px;
@@ -402,13 +405,13 @@ textarea {
 
 .filter-btn.active {
   border-color: var(--accent);
-  background-color: var(--accent-soft);
   color: var(--accent);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 /* Tables */
 .table-wrapper {
+  position: relative;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   overflow-x: auto;
@@ -530,7 +533,7 @@ textarea {
 .field input[type='number'] {
   min-height: 44px;
   width: 100%;
-  border: 1px solid var(--rule-strong);
+  border: 1px solid var(--ink-3);
   border-radius: var(--radius);
   background-color: var(--surface);
   padding: 0 0.8rem;
@@ -578,7 +581,6 @@ textarea {
 
 .radio-option.selected {
   border-color: var(--accent);
-  background-color: var(--accent-soft);
 }
 
 .radio-option input[type='radio'] {
@@ -598,7 +600,7 @@ textarea {
   content: '';
   width: 18px;
   height: 18px;
-  border: 1px solid var(--rule-strong);
+  border: 1px solid var(--ink-3);
   border-radius: 50%;
   background-color: var(--surface);
 }
@@ -645,6 +647,18 @@ textarea {
 .item-meta {
   font-size: 13px;
   color: var(--ink-2);
+}
+
+.item-count {
+  margin-left: auto;
+}
+
+.item-wide {
+  flex-basis: 100%;
+}
+
+.dlq-item .item-meta.mono {
+  white-space: nowrap;
 }
 
 .dlq-item {
@@ -763,7 +777,7 @@ textarea {
     border-top: 1px solid var(--rule);
   }
 
-  .stat-cell:nth-child(odd) {
+  .stat-cell:nth-child(even) {
     border-right: 1px solid var(--rule);
   }
 

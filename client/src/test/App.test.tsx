@@ -148,9 +148,9 @@ describe('OutboxRelay operations console', () => {
     render(<App />);
     const section = (await screen.findByRole('heading', { name: 'Consumers' })).closest('section')!;
     expect(within(section).getByText('consumer-inventory')).toBeInTheDocument();
-    expect(within(section).getByText('14 duplicates rejected')).toBeInTheDocument();
-    expect(within(section).getByText('no deliveries yet')).toBeInTheDocument();
-    expect(within(section).getAllByText('115 events')).toHaveLength(2);
+    expect(within(section).getByText(/^14 duplicates rejected, last delivery [0-9]{2}:[0-9]{2}:[0-9]{2}$/)).toBeInTheDocument();
+    expect(within(section).getByText('0 duplicates rejected, no deliveries yet')).toBeInTheDocument();
+    expect(within(section).getAllByText("115 events")).toHaveLength(2);
   });
 
   it('replays a dead-lettered event through the retry endpoint', async () => {

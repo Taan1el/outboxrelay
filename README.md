@@ -1,189 +1,179 @@
-# OutboxRelay 📦🔄
-> **Transactional Outbox Pattern, Atomicity Dual-Write Engine & Exactly-Once Event Broker**  
-> *Engineered for Zero Data Loss, Row-Leased Poller Execution, Downstream Idempotency & Fault-Tolerant Dead-Letter Recovery*
+# OutboxRelay
 
-[![CI Pipeline](https://img.shields.io/badge/CI-Passing-10b981.svg?style=flat-square)](#)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6.svg?style=flat-square)](#)
-[![Node.js](https://img.shields.io/badge/Node.js-24-339933.svg?style=flat-square)](#)
-[![Database](https://img.shields.io/badge/Database-SQLite%20WAL%20(Native)-003B57.svg?style=flat-square)](#)
-[![React](https://img.shields.io/badge/React-19-61dafb.svg?style=flat-square)](#)
-[![Pattern](https://img.shields.io/badge/Pattern-Transactional%20Outbox-f59e0b.svg?style=flat-square)](#)
-[![Docker](https://img.shields.io/badge/Docker-Compose%20Ready-2496ed.svg?style=flat-square)](#)
+OutboxRelay is a transactional outbox relay. It saves an order and its event in one database transaction, then a poller leases the pending events, hands them to a (simulated) message broker, retries failures with backoff, and moves events that keep failing to a dead-letter queue. A React console shows the outbox rows, the consumers, the dead-letter queue and a fault simulator for the broker.
 
----
+It is meant for developers who want to see how the outbox pattern behaves, including what happens when the broker fails, a lease expires or a consumer sees the same event twice.
 
-## ⚡ Overview
-**OutboxRelay** is an enterprise-grade Transactional Outbox Pattern engine and reliable event broker modeled after mission-critical architectures at fintechs and high-scale European unicorns (Wise, Adyen, Bolt, Pipedrive). It solves the classic distributed **Dual-Write Problem**—where database mutations and asynchronous message broker publishes can fail independently, leaving systems in inconsistent states.
+[![CI](https://github.com/Taan1el/outboxrelay/actions/workflows/ci.yml/badge.svg)](https://github.com/Taan1el/outboxrelay/actions/workflows/ci.yml)
+[![Pages](https://github.com/Taan1el/outboxrelay/actions/workflows/pages.yml/badge.svg)](https://github.com/Taan1el/outboxrelay/actions/workflows/pages.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-### Core Capabilities
-1. **Atomic Dual-Write Guarantee**: Persists domain entity mutations (`orders`) and event records (`outbox_events`) within a single native SQLite ACID transaction (`BEGIN IMMEDIATE`). If either fails, the entire transaction rolls back, guaranteeing zero dual-write discrepancy.
-2. **Row-Leasing Asynchronous Poller**: Leases pending events using monotonic timestamps (`leased_until = now + 5s`), preventing multiple concurrent worker nodes from redundant processing while automatically reclaiming orphaned events if a worker crashes.
-3. **Resilient Retry & Dead-Letter Queue (DLQ)**: Retries transient network failures using exponential backoff. Poison-pill events that fail 3 times are safely isolated to `DEAD_LETTER` with exact error diagnostics, unblocking the pipeline.
-4. **End-to-End Exactly-Once Business Semantics**: Downstream consumers track event processing via an inbox deduplication ledger (`consumer_inbox`), gracefully filtering out duplicate deliveries caused by network retries.
-5. **Interactive Chaos & Fault Simulator**: Operator playground to inject broker faults (50% jitter or 100% outage) and observe real-time backoff, row leasing release, and DLQ trapping.
-6. **Zero External Runtime Dependencies**: Powered by Node.js 24 native SQLite (`DatabaseSync` in WAL mode), offering instant local developer setup without mandatory Docker or external message queues.
+**Live demo:** https://taan1el.github.io/outboxrelay/
 
----
+The demo runs entirely in your browser. The same relay, backoff and validation code the server uses runs against an in-memory store with fixed sample data, so it works with no backend. Nothing is persisted; reload or use "Reset sample data" to start over.
 
-## 🏛️ System Architecture
+## Screenshots
 
-```mermaid
-graph TD
-    subgraph Client ["Frontend (React 19 + TypeScript + Vite)"]
-        UI[OutboxRelay Operations Console]
-        Stats[Real-time Outbox Telemetry Bar]
-        Checkout[Atomic Dual-Write Simulator]
-        Feed[Transactional Outbox Event Stream]
-        Chaos[Broker Chaos & Latency Controls]
-        Consumers[Consumer Fleet & Idempotency Roster]
+![Stats strip and the outbox table](docs/screenshots/01-dashboard.png)
 
-        UI --> Stats
-        UI --> Checkout
-        UI --> Feed
-        UI --> Chaos
-        UI --> Consumers
-    end
+More screenshots: [consumers and the dead-letter queue](docs/screenshots/02-consumers-and-dead-letters.png), [the fault simulator after a full outage](docs/screenshots/03-fault-simulator.png), [the console at phone width](docs/screenshots/04-mobile.png).
 
-    subgraph Server ["Backend (Node.js 24 + Express + Native SQLite WAL)"]
-        API[Express REST Gateway /api]
-        OutboxSvc[Outbox Lifecycle & Poller Service]
-        OrderRepo[Order Repository]
-        BrokerSim[Message Broker Dispatcher & Chaos Engine]
+## Features
 
-        API --> OutboxSvc
-        OutboxSvc --> OrderRepo
-        OutboxSvc --> BrokerSim
-    end
+- **Atomic write.** The order row and its outbox row are inserted in one SQLite transaction (`BEGIN IMMEDIATE`); if either insert fails, neither is stored.
+- **Row leasing.** A poller sets due rows to `LEASED` with a `leased_until` time. A lease that expires without an outcome makes the row due again.
+- **Retries with backoff.** A failed delivery is retried after 2 seconds, then 4 seconds. The third failed attempt moves the event to `DEAD_LETTER`.
+- **Dead-letter queue.** Dead-lettered events keep their last error and can be replayed, which resets their attempts.
+- **Consumer inbox.** Each consumer records `(event id, consumer)` once. A repeated delivery is counted and ignored.
+- **Fault simulator.** Switch the broker between healthy, partial failures (half of the deliveries fail) and full outage, and set the delivery latency.
+- **Browser demo** for GitHub Pages with a demo bar and a reset control.
 
-    subgraph Storage ["Relational ACID Storage"]
-        Orders[(orders table)]
-        Outbox[(outbox_events table)]
-        Inbox[(consumer_inbox table)]
+## Delivery guarantees
 
-        OrderRepo --> Orders
-        OrderRepo --> Outbox
-        BrokerSim --> Inbox
-    end
-```
+Delivery is **at-least-once**, not exactly-once.
 
----
+- A committed order always has its outbox row, because both are written in one transaction.
+- A row is marked `PUBLISHED` only after the simulated broker accepted it. If the process stops after the broker accepted a message but before the row is updated, the row stays `LEASED`.
+- A leased row becomes due again when `leased_until` has passed (5 seconds by default, 1 to 300 through the poll endpoint). The next cycle delivers it again. The same happens if a delivery takes longer than the lease.
+- Because of that, a consumer can receive an event twice. The consumer inbox ignores the repeat, so the effect of an event is applied once as long as the consumer records the inbox entry and does its own work in one transaction. The simulated consumers here only write the inbox entry.
+- Leasing runs in a transaction, so two cycles in one process, or two processes sharing the database file, do not lease the same row at the same time.
 
-## ⚔️ The Dual-Write Problem vs. Transactional Outbox
-
-```
-Naive Dual-Write (Risky):
-[API Endpoint] ──1. Save to Database──> [DB OK]
-        │
-        └──2. Publish to Kafka ──> ❌ [Network Partition / Broker Crash]
-Result: Database updated, but event lost forever. Data inconsistency across microservices.
-
-Transactional Outbox (Guaranteed):
-[API Endpoint] ──1. BEGIN TRANSACTION────────────────────────┐
-                         ├─ INSERT INTO orders                │ (Atomic Commit)
-                         └─ INSERT INTO outbox_events         │
-               ──2. COMMIT TRANSACTION────────────────────────┘
-Result: 100% guaranteed persistence.
-[Background Relayer] ──3. Leases pending events ──> 4. Delivers to Broker ──> 5. Marks PUBLISHED
-```
-
----
-
-## 🛠️ Tech Stack & Engineering Standards
-
-| Layer | Technology | Rationale |
-|---|---|---|
-| **Runtime** | Node.js 24 (ES Modules) | High-performance asynchronous runtime with native SQLite & timers |
-| **Language** | TypeScript 5.8 (Strict Mode) | Full-stack end-to-end type contracts between database, API, and UI |
-| **Backend Framework** | Express 4.21 | Clean REST architecture with modular controllers and routers |
-| **Database** | Native SQLite (`DatabaseSync`) | Zero-config ACID persistence with Write-Ahead Logging (WAL) |
-| **Frontend** | React 19 + Vite 6 | Modern component hierarchy with fast HMR and sub-second builds |
-| **Styling** | Modern CSS Variables & Design Tokens | Dark-mode terminal-inspired theme with responsive mobile/desktop layouts |
-| **Testing** | Vitest 3.0 + React Testing Library | Unit tests for atomic transactions and integration tests for API |
-| **Containerization** | Docker Multi-Stage + Compose | Production alpine container with unprivileged non-root runner |
-| **Architecture** | ADRs (`docs/adr/`) | Recorded decisions on atomicity, row leasing, and consumer deduplication |
-
----
-
-## 🔌 REST API Reference
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/health` | Broker health, active orders, and delivery success rate |
-| `GET` | `/api/stats` | Telemetry: total events, published, leased, dead-letter, deduplicated |
-| `GET` | `/api/orders` | List recent committed orders |
-| `POST` | `/api/orders` | Commit new order with atomic outbox event |
-| `GET` | `/api/outbox/events` | Stream outbox events (optional `?status=PENDING/DEAD_LETTER`) |
-| `POST` | `/api/outbox/poll` | Manually trigger outbox relay poller cycle |
-| `POST` | `/api/outbox/events/:id/retry` | Replay dead-lettered event (resets to `PENDING`) |
-| `GET` | `/api/consumer/inbox` | Audit log of downstream consumer dispatches and deduplication |
-| `POST` | `/api/broker/fault-config` | Inject broker chaos (`HEALTHY`, `PARTIAL_FAILURES`, `FULL_OUTAGE`) |
-
-Manual polling accepts a JSON object with optional `batchSize` (integer 1–100,
-default 10) and `leaseSeconds` (integer 1–300, default 5). Omitted options use
-their defaults. Strings, null, booleans, fractions, and out-of-range values return
-HTTP 400 before any events are leased or dispatched. For example:
-`{"batchSize": 20, "leaseSeconds": 30}`.
-
----
-
-## 💻 Quickstart Guide (Zero-Config)
+## Getting started
 
 ### Prerequisites
-- Node.js 22+ (tested on Node.js 24)
-- npm 10+
+- Node.js 22.13 or newer (built and tested on Node.js 24.14.1; the server uses `node:sqlite`)
+- npm 10 or newer
 
-### 1. Installation
+### Install and run
 ```bash
 git clone https://github.com/Taan1el/outboxrelay.git
 cd outboxrelay
 npm install
-```
-
-### 2. Run Development Environment
-```bash
-# Concurrently starts backend API (port 4003) and Vite frontend (port 5173)
 npm run dev
 ```
-Open **http://localhost:5173** to view the live OutboxRelay operations console.
+This starts the Express server on port 4003 and the Vite dev server on port 5173. Open **http://localhost:5173**. The server creates `data/outbox.db` with two sample orders on first start.
 
-### 3. Run Automated Tests & Quality Checks
-```bash
-# Run backend ACID transaction & poller tests
-npm run test:server
+### Environment variables
+No variable is required for the defaults above.
 
-# Run frontend UI component tests
-npm run test:client
+| Variable | Used by | Default | Purpose |
+|---|---|---|---|
+| `PORT` | server | `4003` | Port the Express server listens on. See `server/.env.example`. |
+| `OUTBOXRELAY_DB_PATH` | server | `data/outbox.db` at the repository root | SQLite database file. |
+| `POLL_INTERVAL_MS` | server | `2500` | Milliseconds between automatic relay cycles (minimum 100). |
+| `VITE_API_TARGET` | client (dev only) | `http://localhost:4003` | Where the Vite dev server proxies `/api`. See `client/.env.example`. |
 
-# Run full test suite across workspace
-npm test
+The server does not load `.env` files itself; export the variables or start Node with `--env-file`.
 
-# Typecheck and lint
-npm run lint
+### Scripts
+| Script | What it does |
+|---|---|
+| `npm run dev` | Server and Vite dev server together |
+| `npm run lint` | Type-checks server and client (`tsc --noEmit`) |
+| `npm test` | Server tests, then client tests |
+| `npm run build` | Compiles the server to `server/dist` and builds the client to `client/dist` |
+| `npm run build:pages` | Builds the client in demo mode with base path `/outboxrelay/` |
+| `npm start --workspace=server` | Runs the compiled server (after `npm run build`); it also serves `client/dist` |
 
-# Production build verification
-npm run build
+## How it works
+
+```
+POST /api/orders
+  BEGIN IMMEDIATE
+    INSERT orders
+    INSERT outbox_events (status PENDING)
+  COMMIT
+
+relay cycle (every 2.5 s, or POST /api/outbox/poll)
+  lease due rows        PENDING and due, or LEASED with an expired lease
+  for each row
+    broker accepts   -> PUBLISHED, one consumer_inbox row per consumer
+    broker fails     -> retry_count + 1
+                          1st or 2nd failure: PENDING, available_at = now + 2 s / 4 s
+                          3rd failure:        DEAD_LETTER
 ```
 
----
+Decisions are written up in [`docs/adr/`](docs/adr/): [ADR-001 transactional outbox](docs/adr/001-transactional-outbox-dual-write-atomicity.md), [ADR-002 row leasing and backoff](docs/adr/002-row-leasing-poller-and-exponential-backoff.md), [ADR-003 consumer inbox and dead-letter queue](docs/adr/003-idempotent-consumer-inbox-and-dead-letter-triage.md).
 
-## 🐳 Docker Deployment
+### Project layout
+```
+shared/    logic used by both the server and the browser demo
+             types.ts, outbox-logic.ts (backoff, validation, leasing rules),
+             relay.ts (one relay cycle), in-memory-outbox.ts, demo-seed.ts
+server/    Express API and SQLite store
+  src/db, src/services, src/controllers, src/routes, src/lib
+  test/    route, validation, store and parity tests
+client/    React 19 console (Vite)
+  src/components, src/services (api.ts, demoApi.ts, index.ts), src/styles, src/test
+docs/      ADRs and screenshots
+```
 
-Run the containerized event broker with Docker Compose:
+The in-memory store used by the demo and the SQLite store are checked against each other in `server/test/store.test.ts`: the same operations must leave both in the same state.
+
+## API reference
+
+All responses are `{ "success": true, "data": ... }` or `{ "success": false, "error": "..." }`. Invalid input returns `400` and changes nothing; unexpected errors return `500` with a generic message.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | Status, order count, pending count, success rate, broker mode |
+| `GET` | `/api/stats` | Event counts by status, order count, consumer counts (`consumers`), success rate, broker mode |
+| `GET` | `/api/orders` | The 50 most recent orders |
+| `POST` | `/api/orders` | Save an order and its outbox event |
+| `GET` | `/api/outbox/events` | The 100 most recent outbox rows; optional `?status=PENDING`, `LEASED`, `PUBLISHED`, `DEAD_LETTER` or `ALL` |
+| `POST` | `/api/outbox/poll` | Run one relay cycle |
+| `POST` | `/api/outbox/events/:id/retry` | Replay a dead-lettered event (`404` if it is not dead-lettered) |
+| `GET` | `/api/consumer/inbox` | The 50 most recent consumer inbox entries |
+| `POST` | `/api/broker/fault-config` | Set the simulated broker state |
+
+Request bodies:
+
+- `POST /api/orders`: `{ "customerId": "cust_1", "items": [{ "name": "Pack", "quantity": 2, "unitPriceEur": 12.5 }], "currency": "EUR" }`. `quantity` is an integer from 1 to 1000, `unitPriceEur` a number from 0 to 1,000,000, `currency` an optional three-letter uppercase code.
+- `POST /api/outbox/poll`: optional `batchSize` (integer 1 to 100, default 10) and `leaseSeconds` (integer 1 to 300, default 5).
+- `POST /api/broker/fault-config`: optional `mode` (`HEALTHY`, `PARTIAL_FAILURES`, `FULL_OUTAGE`), `failureRatePercent` (0 to 100, used by `PARTIAL_FAILURES`, default 50) and `simulatedLatencyMs` (0 to 5000).
+
+The API has no authentication.
+
+## Testing
+
+```bash
+npm test
+```
+
+- **Server** (Vitest and Supertest): routes and validation, transaction rollback, leasing and lease expiry, backoff timing, dead-lettering and replay, the consumer inbox, a migration from a database without `available_at`, the background poller, path resolution, and parity between the SQLite and in-memory stores.
+- **Client** (Vitest and React Testing Library): the stats strip, the outbox table and its filter, the dead-letter replay, the order form, the fault simulator, error handling, the refresh timer, the browser demo API and the demo bar.
+
+Tests that depend on time use fake timers; none of them sleep.
+
+## Deployment
+
+### Docker
 ```bash
 docker compose up --build
 ```
-OutboxRelay will be accessible at **http://localhost:4003**.
+The image builds the server and the client, runs as the unprivileged `node` user and serves both on **http://localhost:4003**. The database lives in `/app/data`, which Compose mounts as a named volume. The Dockerfile is built in CI but not run there, so run the container once yourself before relying on it.
 
----
+### GitHub Pages
+`.github/workflows/pages.yml` builds the demo with `npm run build:pages` and deploys it with GitHub Pages when the repository is public. The base path is `/outboxrelay/`.
 
-## 📜 Architecture Decision Records (ADRs)
+## Design notes and limitations
 
-Key architectural decisions are documented under [`docs/adr/`](./docs/adr/):
-- [ADR-001: Transactional Outbox Pattern for Dual-Write Atomicity](./docs/adr/001-transactional-outbox-dual-write-atomicity.md)
-- [ADR-002: Row Leasing Poller with Monotonic Timeouts and Exponential Backoff](./docs/adr/002-row-leasing-poller-and-exponential-backoff.md)
-- [ADR-003: Idempotent Consumer Inbox and Dead-Letter Queue (DLQ) Triage](./docs/adr/003-idempotent-consumer-inbox-and-dead-letter-triage.md)
+- The broker and the three consumers (`consumer-notifications`, `consumer-inventory`, `consumer-analytics`) are simulated inside the server process. There is no connection to Kafka, RabbitMQ or any other real broker.
+- SQLite is a single file. The outbox here suits one node; it is not a distributed outbox, and a shared file on a network filesystem is not supported.
+- Leases and backoff use the wall clock, so a large clock change on the host shifts them.
+- Events whose retries are exhausted wait in the dead-letter queue until someone replays them.
+- Consumer inbox rows and published outbox rows are never pruned.
+- The console polls the API every 2.5 seconds; it does not use push updates.
+- No performance figures are claimed. The project has not been benchmarked.
+- The interface follows a plain, light design: one amber-brown accent, status shown as a dot plus a label, self-hosted fonts, no gradients or shadows.
 
----
+## Roadmap
 
-## 📄 License
-MIT License.
+- A real broker adapter behind the same relay interface.
+- Pruning for published rows and consumer inbox entries.
+- Authentication for the API.
+- Metrics for cycle duration and queue age.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

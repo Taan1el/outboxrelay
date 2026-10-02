@@ -85,6 +85,25 @@ describe('retry backoff in SQLite', () => {
   });
 });
 
+describe('atomic order and event write', () => {
+  it('stores neither row when the event insert fails', () => {
+    const db = new OutboxDatabase(':memory:');
+    addOrder(db, 20, T0);
+    const { order, event } = buildOrderWithEvent(
+      { customerId: 'cust_dup', items: [{ name: 'Item', quantity: 1, unitPriceEur: 1 }] },
+      { orderId: 'ord_21', eventId: 'evt_20' }, // event id already used
+      new Date(T0),
+    );
+    expect(() => db.createOrderWithOutboxEvent(order, event)).toThrow();
+    expect(db.getOrders().some((o) => o.id === 'ord_21')).toBe(false);
+    expect(db.getStats().totalOrders).toBe(3);
+    // the connection is usable afterwards
+    addOrder(db, 22, T0);
+    expect(db.getStats().totalOrders).toBe(4);
+    db.close();
+  });
+});
+
 describe('consumer inbox and stats', () => {
   let db: OutboxDatabase;
   beforeEach(() => {

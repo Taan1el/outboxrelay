@@ -22,9 +22,10 @@ export const ConsumerFleet: React.FC<ConsumerFleetProps> = ({ consumers }) => (
         {consumers.map((c) => (
           <li key={c.consumerId} className="dense-item">
             <span className="mono item-title">{c.consumerId}</span>
-            <span className="item-meta mono">{formatCount(c.processed, 'event')}</span>
-            <span className="item-meta mono">{`${c.duplicatesRejected} duplicates rejected`}</span>
-            <span className="item-meta mono">{c.lastProcessedAt ? `last ${formatClock(c.lastProcessedAt)}` : 'no deliveries yet'}</span>
+            <span className="item-meta mono item-count">{formatCount(c.processed, 'event')}</span>
+            <span className="item-meta mono item-wide">
+              {`${c.duplicatesRejected} duplicates rejected, ${c.lastProcessedAt ? `last delivery ${formatClock(c.lastProcessedAt)}` : 'no deliveries yet'}`}
+            </span>
           </li>
         ))}
       </ul>
