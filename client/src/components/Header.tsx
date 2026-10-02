@@ -1,47 +1,49 @@
 import React from 'react';
+import { Play, RefreshCw } from 'lucide-react';
+import type { BrokerFaultConfig } from '../../../shared/types.js';
 
 interface HeaderProps {
-  brokerMode: 'HEALTHY' | 'PARTIAL_FAILURES' | 'FULL_OUTAGE';
-  pendingCount: number;
+  brokerMode: BrokerFaultConfig['mode'];
   onPollNow: () => void;
+  onRefresh: () => void;
   isPolling: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ brokerMode, pendingCount, onPollNow, isPolling }) => {
+const MODE_LABEL: Record<BrokerFaultConfig['mode'], { text: string; tone: 'ok' | 'warn' | 'bad' }> = {
+  HEALTHY: { text: 'healthy', tone: 'ok' },
+  PARTIAL_FAILURES: { text: 'partial failures', tone: 'warn' },
+  FULL_OUTAGE: { text: 'full outage', tone: 'bad' },
+};
+
+export const Header: React.FC<HeaderProps> = ({ brokerMode, onPollNow, onRefresh, isPolling }) => {
+  const mode = MODE_LABEL[brokerMode];
   return (
     <header className="app-header">
-      <div className="header-brand">
-        <div className="brand-logo">
-          <span className="brand-icon">📦</span>
-          <div className="pulse-ring"></div>
-        </div>
-        <div className="brand-titles">
-          <div className="brand-row">
-            <h1 className="brand-name">OutboxRelay</h1>
-            <span className="badge badge-version">v1.0</span>
-            <span className={`badge badge-broker ${brokerMode.toLowerCase()}`}>
-              Broker: {brokerMode.replace('_', ' ')}
+      <div className="header-inner">
+        <div>
+          <h1 className="brand-name">OutboxRelay</h1>
+          <p className="brand-subtitle">
+            Saves each order and its event in one transaction, then relays events to consumers with retries and a dead-letter queue.
+          </p>
+          <div className="header-meta">
+            <span className="badge">v1.0</span>
+            <span className="badge">
+              <span className={`status-dot ${mode.tone}`} aria-hidden="true" />
+              Broker {mode.text}
             </span>
           </div>
-          <p className="brand-subtitle">
-            Transactional Outbox Pattern, Atomicity Dual-Write Engine & Exactly-Once Event Broker
-          </p>
         </div>
-      </div>
 
-      <div className="header-actions">
-        <div className="live-pill">
-          <span className={`live-dot ${pendingCount > 0 ? 'pulse-amber' : ''}`}></span>
-          <span>{pendingCount} outbox queued</span>
+        <div className="header-actions">
+          <button type="button" className="btn btn-secondary" onClick={onRefresh}>
+            <RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" />
+            Refresh
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onPollNow} disabled={isPolling}>
+            <Play size={16} strokeWidth={1.75} aria-hidden="true" />
+            {isPolling ? 'Running cycle' : 'Run relay cycle'}
+          </button>
         </div>
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={onPollNow}
-          disabled={isPolling}
-          title="Manually trigger relay poller"
-        >
-          {isPolling ? 'Relaying...' : '⚡ Poll & Relay Now'}
-        </button>
       </div>
     </header>
   );

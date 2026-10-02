@@ -1,7 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import App from '../App.js';
-import type { OutboxStats, Order, OutboxEvent, ConsumerInboxItem } from '../../../shared/types.js';
+import type { OutboxStats, Order, OutboxEvent, PollCycleResult } from '../../../shared/types.js';
+
+const NOW = new Date('2026-03-01T10:00:00.000Z').getTime();
 
 const mockStats: OutboxStats = {
   totalEvents: 120,
@@ -13,6 +16,11 @@ const mockStats: OutboxStats = {
   consumerProcessed: 345,
   consumerDuplicatesRejected: 14,
   deliverySuccessRate: 98.3,
+  consumers: [
+    { consumerId: 'consumer-notifications', processed: 115, duplicatesRejected: 0, lastProcessedAt: '2026-03-01T09:59:00.000Z' },
+    { consumerId: 'consumer-inventory', processed: 115, duplicatesRejected: 14, lastProcessedAt: '2026-03-01T09:59:01.000Z' },
+    { consumerId: 'consumer-analytics', processed: 0, duplicatesRejected: 0, lastProcessedAt: null },
+  ],
   brokerMode: 'HEALTHY',
 };
 
@@ -24,130 +32,224 @@ const mockOrders: Order[] = [
     totalEur: 499,
     currency: 'EUR',
     status: 'CONFIRMED',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: new Date(NOW).toISOString(),
+    updatedAt: new Date(NOW).toISOString(),
   },
 ];
+
+const base = {
+  aggregateType: 'Order',
+  eventType: 'ORDER_CONFIRMED',
+  leasedUntil: null,
+  availableAt: null,
+  createdAt: new Date(NOW).toISOString(),
+  publishedAt: null,
+  errorMessage: null,
+};
 
 const mockEvents: OutboxEvent[] = [
-  {
-    id: 'evt_mock_1',
-    aggregateType: 'Order',
-    aggregateId: 'ord_mock_1',
-    eventType: 'ORDER_CONFIRMED',
-    payload: { totalEur: 499 },
-    status: 'PUBLISHED',
-    retryCount: 0,
-    leasedUntil: null,
-    createdAt: new Date().toISOString(),
-    publishedAt: new Date().toISOString(),
-    errorMessage: null,
-  },
-  {
-    id: 'evt_mock_2',
-    aggregateType: 'Order',
-    aggregateId: 'ord_mock_2',
-    eventType: 'ORDER_CONFIRMED',
-    payload: { totalEur: 250 },
-    status: 'DEAD_LETTER',
-    retryCount: 3,
-    leasedUntil: null,
-    createdAt: new Date().toISOString(),
-    publishedAt: null,
-    errorMessage: 'Connection refused',
-  },
+  { ...base, id: 'evt_pub', aggregateId: 'ord_a', payload: { totalEur: 499 }, status: 'PUBLISHED', retryCount: 0, publishedAt: new Date(NOW).toISOString() },
+  { ...base, id: 'evt_dead', aggregateId: 'ord_b', payload: { totalEur: 250 }, status: 'DEAD_LETTER', retryCount: 3, errorMessage: 'Connection refused' },
+  { ...base, id: 'evt_retry', aggregateId: 'ord_c', payload: {}, status: 'PENDING', retryCount: 1, availableAt: NOW + 2000, errorMessage: 'Timeout' },
 ];
 
-const mockInbox: ConsumerInboxItem[] = [
-  {
-    id: 'inbox_1',
-    eventId: 'evt_mock_1',
-    consumerId: 'consumer-notifications',
-    eventType: 'ORDER_CONFIRMED',
-    processedAt: new Date().toISOString(),
-    duplicateDetected: false,
-  },
-];
+const cycle: PollCycleResult = { leasedCount: 3, dispatchedCount: 2, failedCount: 1, deadLetterCount: 0, durationMs: 41.5 };
 
-describe('OutboxRelay Operations Console', () => {
+type Call = { url: string; method: string; body: unknown };
+let calls: Call[];
+let failStats = false;
+let failPoll = false;
+
+function installFetch() {
+  calls = [];
+  global.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET';
+    calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    const ok = (data: unknown) => ({ ok: true, json: async () => ({ success: true, data }) });
+    if (url.endsWith('/stats')) {
+      return failStats ? { ok: false, statusText: 'Server Error', json: async () => ({ error: 'database is locked' }) } : ok(mockStats);
+    }
+    if (url.endsWith('/outbox/poll')) {
+      return failPoll ? { ok: false, statusText: 'Bad Request', json: async () => ({ error: 'batchSize must be an integer' }) } : ok(cycle);
+    }
+    if (url.includes('/outbox/events?status=DEAD_LETTER')) return ok(mockEvents.filter((e) => e.status === 'DEAD_LETTER'));
+    if (url.includes('/retry')) return { ok: true, json: async () => ({ success: true }) };
+    if (url.includes('/outbox/events')) return ok(mockEvents);
+    if (url.endsWith('/orders') && method === 'POST') {
+      return ok({ order: { ...mockOrders[0], id: 'ord_new', totalEur: 998 }, event: { ...mockEvents[2], id: 'evt_new', status: 'PENDING' } });
+    }
+    if (url.endsWith('/orders')) return ok(mockOrders);
+    return ok({});
+  });
+}
+
+const calledWith = (method: string, fragment: string) => calls.filter((c) => c.method === method && c.url.includes(fragment));
+
+describe('OutboxRelay operations console', () => {
   beforeEach(() => {
+    failStats = false;
+    failPoll = false;
+    installFetch();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
-
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes('/stats')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ success: true, data: mockStats }),
-        });
-      }
-      if (url.includes('/orders')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ success: true, data: mockOrders }),
-        });
-      }
-      if (url.includes('/outbox/events')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ success: true, data: mockEvents }),
-        });
-      }
-      if (url.includes('/consumer/inbox')) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ success: true, data: mockInbox }),
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ success: true, data: {} }),
-      });
-    });
   });
 
-  it('renders branding, stats bar, and broker mode badge', async () => {
+  it('shows the product name, broker state and the statistics strip', async () => {
     render(<App />);
-
-    expect(screen.getAllByText('OutboxRelay').length).toBeGreaterThanOrEqual(1);
-
-    await waitFor(() => {
-      expect(screen.getByText('98.3%')).toBeInTheDocument();
-      expect(screen.getByText('115 published / 2 dead-lettered')).toBeInTheDocument();
-    });
-
-    expect(screen.getAllByText(/Broker: HEALTHY/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('heading', { level: 1, name: 'OutboxRelay' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('98.3%')).toBeInTheDocument());
+    expect(screen.getByText('115 published, 2 dead-lettered')).toBeInTheDocument();
+    expect(screen.getByText('1 leased')).toBeInTheDocument();
+    expect(screen.getByText('120 outbox rows')).toBeInTheDocument();
+    expect(screen.getByText('345 deliveries')).toBeInTheDocument();
+    expect(screen.getByText(/Broker healthy/)).toBeInTheDocument();
+    expect(screen.getByRole('meter', { name: 'Delivery success' })).toHaveAttribute('aria-valuenow', '98.3');
   });
 
-  it('renders checkout simulator with atomic dual-write trigger', async () => {
+  it('lists outbox rows with a status label and the next retry time', async () => {
     render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/Dual-Write Atomicity Simulator/i)).toBeInTheDocument();
-    });
-
-    expect(screen.getByText(/Commit Order & Outbox Event/i)).toBeInTheDocument();
+    const table = await screen.findByRole('table', { name: '3 outbox rows' });
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(4);
+    expect(within(rows[1]).getByText('Published')).toBeInTheDocument();
+    expect(within(rows[3]).getByText('Pending')).toBeInTheDocument();
+    expect(within(rows[3]).getByText(/^retry at \d\d:\d\d:\d\d$/)).toBeInTheDocument();
+    expect(within(rows[3]).getByText('1 of 3')).toBeInTheDocument();
   });
 
-  it('renders outbox events stream with dead-letter replay button', async () => {
+  it('filters rows by status without another request', async () => {
+    const user = userEvent.setup();
     render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByText('evt_mock_1')).toBeInTheDocument();
-      expect(screen.getByText('evt_mock_2')).toBeInTheDocument();
-    });
-
-    expect(screen.getByText(/🔁 Replay DLQ/i)).toBeInTheDocument();
+    await screen.findByRole('table', { name: '3 outbox rows' });
+    const before = calls.length;
+    await user.click(screen.getByRole('button', { name: 'Dead letter' }));
+    expect(screen.getByRole('table', { name: '1 outbox row' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dead letter' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Leased' }));
+    expect(screen.getByText('No outbox rows with this status.')).toBeInTheDocument();
+    expect(calls.length).toBe(before);
   });
 
-  it('renders broker chaos options and consumer nodes', async () => {
+  it('expands a row to show its payload and last error', async () => {
+    const user = userEvent.setup();
     render(<App />);
+    await screen.findByRole('table', { name: '3 outbox rows' });
+    await user.click(screen.getByRole('button', { name: 'Show payload for evt_dead' }));
+    expect(screen.getByText('Last error: Connection refused')).toBeInTheDocument();
+    expect(screen.getByText(/"totalEur": 250/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Hide payload for evt_dead' }));
+    expect(screen.queryByText(/"totalEur": 250/)).not.toBeInTheDocument();
+  });
 
-    await waitFor(() => {
-      expect(screen.getByText(/Message Broker Chaos Controls/i)).toBeInTheDocument();
-      expect(screen.getByText(/PARTIAL JITTER/i)).toBeInTheDocument();
-      expect(screen.getByText(/FULL OUTAGE/i)).toBeInTheDocument();
+  it('shows consumers, including one with no deliveries', async () => {
+    render(<App />);
+    const section = (await screen.findByRole('heading', { name: 'Consumers' })).closest('section')!;
+    expect(within(section).getByText('consumer-inventory')).toBeInTheDocument();
+    expect(within(section).getByText('14 duplicates rejected')).toBeInTheDocument();
+    expect(within(section).getByText('no deliveries yet')).toBeInTheDocument();
+    expect(within(section).getAllByText('115 events')).toHaveLength(2);
+  });
+
+  it('replays a dead-lettered event through the retry endpoint', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const section = (await screen.findByRole('heading', { name: 'Dead-letter queue' })).closest('section')!;
+    expect(await within(section).findByText('Connection refused')).toBeInTheDocument();
+    await user.click(within(section).getByRole('button', { name: /Replay/ }));
+    await waitFor(() => expect(calledWith('POST', '/outbox/events/evt_dead/retry')).toHaveLength(1));
+  });
+
+  it('runs a relay cycle and prints its result', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText('98.3%');
+    await user.click(screen.getByRole('button', { name: 'Run relay cycle' }));
+    const results = (await screen.findByRole('heading', { name: 'Last relay cycle' })).parentElement!;
+    await waitFor(() => expect(within(results).getByText('41.5 ms')).toBeInTheDocument());
+    expect(calledWith('POST', '/outbox/poll')[0].body).toEqual({ batchSize: 10, leaseSeconds: 5 });
+    expect(within(results).getByText('Dead-lettered')).toBeInTheDocument();
+  });
+
+  it('reports a failed relay cycle with the server message', async () => {
+    failPoll = true;
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText('98.3%');
+    await user.click(screen.getByRole('button', { name: 'Run relay cycle' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Relay cycle failed: batchSize must be an integer');
+    expect(screen.getByRole('button', { name: 'Run relay cycle' })).toBeEnabled();
+  });
+
+  it('saves an order with the chosen product and quantity', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText('98.3%');
+    await user.selectOptions(screen.getByLabelText('Product'), 'node');
+    const quantity = screen.getByLabelText('Quantity');
+    await user.clear(quantity);
+    await user.type(quantity, '2');
+    await user.click(screen.getByRole('button', { name: 'Save order and event' }));
+    await waitFor(() => expect(calledWith('POST', '/orders')).toHaveLength(1));
+    expect(calledWith('POST', '/orders')[0].body).toEqual({
+      customerId: 'cust_tallinn_katrin',
+      items: [{ name: 'Broker node', quantity: 2, unitPriceEur: 850 }],
+      currency: 'EUR',
     });
+    expect(await screen.findByText(/Saved ord_new \(EUR 998\.00\) with outbox row evt_new/)).toBeInTheDocument();
+  });
 
-    expect(screen.getByText('consumer-notifications')).toBeInTheDocument();
+  it('applies broker settings', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText('98.3%');
+    await user.click(screen.getByRole('radio', { name: /Full outage/ }));
+    await user.click(screen.getByRole('button', { name: 'Apply broker settings' }));
+    await waitFor(() => expect(calledWith('POST', '/broker/fault-config')).toHaveLength(1));
+    expect(calledWith('POST', '/broker/fault-config')[0].body).toEqual({ mode: 'FULL_OUTAGE', simulatedLatencyMs: 30 });
+    expect(await screen.findByText('Broker set to full outage.')).toBeInTheDocument();
+  });
+
+  it('lists events waiting for a retry in the fault simulator', async () => {
+    render(<App />);
+    const heading = await screen.findByRole('heading', { name: 'Waiting for retry' });
+    const results = heading.parentElement!;
+    expect(await within(results).findByText('evt_retry')).toBeInTheDocument();
+    expect(within(results).getByText(/A failed delivery is retried after 2 s, 4 s/)).toBeInTheDocument();
+  });
+
+  it('shows a load error and recovers on retry', async () => {
+    failStats = true;
+    const user = userEvent.setup();
+    render(<App />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('database is locked');
+    failStats = false;
+    await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.getByText('98.3%')).toBeInTheDocument();
+  });
+
+  it('refreshes on a timer and stops after unmount', async () => {
+    vi.useFakeTimers();
+    const { unmount } = render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const initial = calledWith('GET', '/stats').length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(calledWith('GET', '/stats').length).toBe(initial + 2);
+    unmount();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calledWith('GET', '/stats').length).toBe(initial + 2);
+  });
+
+  it('uses no emoji in the visible text', async () => {
+    render(<App />);
+    await screen.findByText('98.3%');
+    expect(document.body.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
   });
 });
