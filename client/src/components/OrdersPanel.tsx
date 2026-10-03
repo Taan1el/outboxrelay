@@ -118,7 +118,7 @@ export const OrdersPanel: React.FC<OrdersPanelProps> = ({ orders, onOrderCreated
       {orders.length === 0 ? (
         <p className="empty-note">No orders yet.</p>
       ) : (
-        <div className="table-wrapper">
+        <div className="table-wrapper" role="region" tabIndex={0} aria-label="Orders table">
           <table className="data-table">
             <thead>
               <tr>

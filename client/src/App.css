@@ -841,3 +841,8 @@ textarea {
     transition: none !important;
   }
 }
+
+.table-wrapper:focus-visible,
+.payload-pre:focus-visible {
+  outline-offset: -2px;
+}

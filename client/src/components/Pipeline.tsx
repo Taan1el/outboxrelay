@@ -115,7 +115,7 @@ export const Pipeline: React.FC<PipelineProps> = ({ events, isPolling, onPollNow
                         {open && (
                           <div className="detail">
                             {evt.errorMessage && <p className="detail-error">{`Last error: ${evt.errorMessage}`}</p>}
-                            <pre className="payload-pre">
+                            <pre className="payload-pre" role="region" tabIndex={0} aria-label={`Payload for ${evt.id}`}>
                               {JSON.stringify(
                                 {
                                   aggregateType: evt.aggregateType,

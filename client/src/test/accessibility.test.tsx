@@ -106,4 +106,18 @@ describe('Accessibility checks', () => {
     expect(screen.getByText('Last error: Connection refused')).toBeInTheDocument();
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it('makes every sideways or vertical scroll container keyboard reachable', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    await screen.findByText('ord_1');
+    await user.click(await screen.findByRole('button', { name: 'Show payload for evt_dead' }));
+    const scrollers = container.querySelectorAll('.table-wrapper, .payload-pre');
+    expect(scrollers.length).toBeGreaterThanOrEqual(2);
+    scrollers.forEach((el) => {
+      expect(el).toHaveAttribute('role', 'region');
+      expect(el).toHaveAttribute('tabindex', '0');
+      expect(el.getAttribute('aria-label')?.trim()).toBeTruthy();
+    });
+  });
 });
