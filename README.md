@@ -142,6 +142,7 @@ npm test
 
 - **Server** (Vitest and Supertest): routes and validation, transaction rollback, leasing and lease expiry, backoff timing, dead-lettering and replay, the consumer inbox, a migration from a database without `available_at`, the background poller, path resolution, and parity between the SQLite and in-memory stores.
 - **Client** (Vitest and React Testing Library): the tally, the four lanes with their row counts, the show-all toggle, the dead-letter replay, the order form, the fault simulator, error handling, the refresh timer, the browser demo API and the demo bar.
+- **Accessibility** (axe-core through vitest-axe): the suite includes automated accessibility checks for the lanes, the orders and consumers panels, the fault simulator and an opened row detail, using the WCAG 2 A and AA rules. jsdom cannot compute colors, so color contrast is checked outside jsdom.
 
 Tests that depend on time use fake timers; none of them sleep.
 

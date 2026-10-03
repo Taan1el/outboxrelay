@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Automated accessibility checks for the four lanes, the orders and consumers panels, the fault simulator and an opened row detail, run with axe-core against the WCAG 2 A and AA rules. They found no violations, so no product code changed. Color contrast is checked outside the test suite because jsdom cannot compute colors.
+
 ### Changed
 - New visual identity: a sand-colored page with square corners, amber as the only accent, and Schibsted Grotesk, Instrument Sans and Space Mono as fonts.
 - The outbox is now four side-by-side lanes (pending, leased, published, dead letter) separated by dashed rules, each with a large row count and its newest rows listed inside, replacing the old table, filter buttons and stats strip.
