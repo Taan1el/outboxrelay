@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- The orders table and the opened payload block can scroll sideways or vertically on narrow screens; both can now be reached and scrolled with the keyboard, with a visible focus outline.
+
 ### Added
+- A test that checks every scrollable container is a labelled, focusable region.
 - Automated accessibility checks for the four lanes, the orders and consumers panels, the fault simulator and an opened row detail, run with axe-core against the WCAG 2 A and AA rules. They found no violations, so no product code changed. Color contrast is checked outside the test suite because jsdom cannot compute colors.
 
 ### Changed
