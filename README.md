@@ -33,7 +33,7 @@ More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/0
 Delivery is **at-least-once**, not exactly-once.
 
 - A committed order always has its outbox row, because both are written in one transaction.
-- A row is marked `PUBLISHED` only after the simulated broker accepted it. If the process stops after the broker accepted a message but before the row is updated, the row stays `LEASED`.
+- A row is marked `PUBLISHED` only after the simulated broker accepted it and all simulated consumer receipts were recorded. If a receipt or the publication write fails, the row stays `LEASED`. After lease expiry, another cycle retries delivery; existing receipts are deduplicated and missing receipts are completed.
 - A leased row becomes due again when `leased_until` has passed (5 seconds by default, 1 to 300 through the poll endpoint). The next cycle delivers it again. The same happens if a delivery takes longer than the lease.
 - Because of that, a consumer can receive an event twice. The consumer inbox ignores the repeat, so the effect of an event is applied once as long as the consumer records the inbox entry and does its own work in one transaction. The simulated consumers here only write the inbox entry.
 - Leasing runs in a transaction, so two cycles in one process, or two processes sharing the database file, do not lease the same row at the same time.

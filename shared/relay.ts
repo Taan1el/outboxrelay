@@ -45,11 +45,12 @@ export async function runRelayCycle(
       const { status } = store.markEventFailed(event.id, failureMessage(faults.mode));
       if (status === 'DEAD_LETTER') deadLetterCount++;
     } else {
-      store.markEventPublished(event.id);
-      dispatchedCount++;
       for (const consumerId of CONSUMER_IDS) {
         store.recordConsumerInbox(event.id, consumerId, event.eventType);
       }
+      // Keep the lease retryable if any receipt fails; existing receipts deduplicate on replay.
+      store.markEventPublished(event.id);
+      dispatchedCount++;
     }
   }
 
