@@ -71,6 +71,30 @@ describe('REST API validation and responses', () => {
     expect(stats.body.data.brokerMode).toBe('PARTIAL_FAILURES');
   });
 
+  it.each([0, 12.5, 100])('applies a rate-only patch of %s percent to subsequent deliveries', async (rate) => {
+    await request(app).post('/api/broker/fault-config').send({ mode: 'PARTIAL_FAILURES', failureRatePercent: 50 });
+    const updated = await request(app).post('/api/broker/fault-config').send({ failureRatePercent: rate });
+    expect(updated.status).toBe(200);
+    expect(updated.body.data).toEqual({ mode: 'PARTIAL_FAILURES', failureRatePercent: rate, simulatedLatencyMs: 0 });
+    const random = vi.spyOn(Math, 'random').mockReturnValueOnce(0.25);
+    try {
+      const poll = await request(app).post('/api/outbox/poll').send({});
+      expect(poll.status).toBe(200);
+      expect(poll.body.data).toMatchObject({ leasedCount: 1, failedCount: rate > 25 ? 1 : 0, dispatchedCount: rate > 25 ? 0 : 1 });
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it('preserves a custom rate on repeated mode and latency patches and rejects invalid patches atomically', async () => {
+    await request(app).post('/api/broker/fault-config').send({ mode: 'PARTIAL_FAILURES', failureRatePercent: 20 });
+    const updated = await request(app).post('/api/broker/fault-config').send({ mode: 'PARTIAL_FAILURES', simulatedLatencyMs: 15 });
+    const expected = { mode: 'PARTIAL_FAILURES', failureRatePercent: 20, simulatedLatencyMs: 15 };
+    expect(updated.body.data).toEqual(expected);
+    expect((await request(app).post('/api/broker/fault-config').send({ failureRatePercent: 101, simulatedLatencyMs: 25 })).status).toBe(400);
+    expect((await request(app).post('/api/broker/fault-config').send({})).body.data).toEqual(expected);
+  });
+
   it('returns 404 when replaying an event that is not dead-lettered', async () => {
     const res = await request(app).post('/api/outbox/events/evt_outbox_101/retry');
     expect(res.status).toBe(404);

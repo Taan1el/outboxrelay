@@ -93,6 +93,13 @@ describe('browser demo API', () => {
     await expect(demo.updateBrokerFault({ simulatedLatencyMs: -1 })).rejects.toThrow(/simulatedLatencyMs/);
   });
 
+  it.each([0, 100])('uses a rate-only patch of %s percent for demo deliveries', async (rate) => {
+    await demo.updateBrokerFault({ mode: 'PARTIAL_FAILURES', failureRatePercent: 50, simulatedLatencyMs: 0 });
+    expect(await demo.updateBrokerFault({ failureRatePercent: rate })).toEqual({ mode: 'PARTIAL_FAILURES', failureRatePercent: rate, simulatedLatencyMs: 0 });
+    expect(await demo.updateBrokerFault({ mode: 'PARTIAL_FAILURES' })).toMatchObject({ failureRatePercent: rate });
+    expect(await demo.triggerPoll()).toMatchObject({ leasedCount: 2, failedCount: rate === 100 ? 2 : 0, dispatchedCount: rate === 100 ? 0 : 2 });
+  });
+
   it('repeats the same partial-failure outcomes after a reset', async () => {
     const outcome = async () => {
       demo.resetDemoData();

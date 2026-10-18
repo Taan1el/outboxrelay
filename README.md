@@ -130,7 +130,7 @@ Request bodies:
 
 - `POST /api/orders`: `{ "customerId": "cust_1", "items": [{ "name": "Pack", "quantity": 2, "unitPriceEur": 12.5 }], "currency": "EUR" }`. `quantity` is an integer from 1 to 1000, `unitPriceEur` a number from 0 to 1,000,000, `currency` an optional three-letter uppercase code.
 - `POST /api/outbox/poll`: optional `batchSize` (integer 1 to 100, default 10) and `leaseSeconds` (integer 1 to 300, default 5).
-- `POST /api/broker/fault-config`: optional `mode` (`HEALTHY`, `PARTIAL_FAILURES`, `FULL_OUTAGE`), `failureRatePercent` (0 to 100, used by `PARTIAL_FAILURES`, default 50) and `simulatedLatencyMs` (0 to 5000).
+- `POST /api/broker/fault-config`: optional `mode` (`HEALTHY`, `PARTIAL_FAILURES`, `FULL_OUTAGE`), `failureRatePercent` (0 to 100) and `simulatedLatencyMs` (0 to 5000). In partial-failure mode, a rate-only patch changes the delivery failure probability; omitted rates retain their current value, including when resubmitting the same mode. Entering partial-failure mode from another mode defaults to 50 unless a rate is supplied. Healthy and full-outage modes always use 0 and 100 respectively, regardless of a supplied rate. Omitted latency is preserved. The browser demo follows the same rules.
 
 The API has no authentication.
 

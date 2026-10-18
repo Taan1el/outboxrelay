@@ -74,6 +74,14 @@ describe('fault simulation', () => {
 });
 
 describe('validateFaultConfig', () => {
+  it.each(['HEALTHY', 'FULL_OUTAGE'] as const)('keeps %s rates fixed and defaults new partial mode to 50', (mode) => {
+    const current = applyFaultConfig(healthy, { mode });
+    const changed = applyFaultConfig(current, { failureRatePercent: 25, simulatedLatencyMs: 15 });
+    expect(changed).toEqual({ mode, failureRatePercent: mode === 'HEALTHY' ? 0 : 100, simulatedLatencyMs: 15 });
+    expect(applyFaultConfig(changed, { mode: 'PARTIAL_FAILURES' }).failureRatePercent).toBe(50);
+    expect(current.simulatedLatencyMs).toBe(0);
+  });
+
   it('accepts partial patches', () => {
     expect(validateFaultConfig({})).toEqual({});
     expect(validateFaultConfig({ mode: 'FULL_OUTAGE', simulatedLatencyMs: 0 })).toEqual({ mode: 'FULL_OUTAGE', simulatedLatencyMs: 0 });

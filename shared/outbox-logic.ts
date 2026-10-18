@@ -83,12 +83,11 @@ export function shouldSimulateFailure(config: BrokerFaultConfig, random: () => n
 /** Applies a validated fault-config patch and returns the new configuration. */
 export function applyFaultConfig(current: BrokerFaultConfig, patch: Partial<BrokerFaultConfig>): BrokerFaultConfig {
   const next = { ...current };
-  if (patch.mode) {
-    next.mode = patch.mode;
-    if (patch.mode === 'HEALTHY') next.failureRatePercent = 0;
-    else if (patch.mode === 'FULL_OUTAGE') next.failureRatePercent = 100;
-    else next.failureRatePercent = patch.failureRatePercent ?? 50;
-  }
+  next.mode = patch.mode ?? current.mode;
+  if (next.mode === 'HEALTHY') next.failureRatePercent = 0;
+  else if (next.mode === 'FULL_OUTAGE') next.failureRatePercent = 100;
+  else next.failureRatePercent = patch.failureRatePercent
+    ?? (current.mode === 'PARTIAL_FAILURES' ? current.failureRatePercent : 50);
   if (patch.simulatedLatencyMs !== undefined) next.simulatedLatencyMs = patch.simulatedLatencyMs;
   return next;
 }
