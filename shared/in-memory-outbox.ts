@@ -96,7 +96,9 @@ export class InMemoryOutbox implements RelayStore {
       existing.duplicateDetected = true;
       return { duplicate: true };
     }
-    this.inboxSequence += 1;
+    do {
+      this.inboxSequence += 1;
+    } while (this.inbox.some((item) => item.id === `inbox_${this.inboxSequence}`));
     this.inbox.push({
       id: `inbox_${this.inboxSequence}`,
       eventId,

@@ -25,6 +25,7 @@ More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/0
 - **Retries with backoff.** A failed delivery is retried after 2 seconds, then 4 seconds. The third failed attempt moves the event to `DEAD_LETTER`.
 - **Dead-letter queue.** Dead-lettered events keep their last error and can be replayed, which resets their attempts.
 - **Consumer inbox.** Each consumer records `(event id, consumer)` once. A repeated delivery is counted and ignored.
+  Receipt IDs are opaque: SQLite uses UUIDs, while the browser store allocates sequential IDs without reusing seeded receipt IDs. Existing receipt IDs remain unchanged.
 - **Fault simulator.** Switch the broker between healthy, partial failures (half of the deliveries fail) and full outage, and set the delivery latency.
 - **Browser demo** for GitHub Pages with a demo bar and a reset control.
 

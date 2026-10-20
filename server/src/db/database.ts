@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
 import type { ConsumerInboxItem, ConsumerStats, Order, OutboxEvent, OutboxStats } from '../../../shared/types.js';
@@ -290,7 +291,7 @@ export class OutboxDatabase {
       return { duplicate: true };
     }
 
-    const id = `inbox_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const id = `inbox_${randomUUID()}`;
     const now = new Date().toISOString();
     this.db.prepare(`
       INSERT INTO consumer_inbox (id, event_id, consumer_id, event_type, processed_at, duplicate_detected)
