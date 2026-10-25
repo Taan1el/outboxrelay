@@ -31,7 +31,7 @@ export class OutboxService {
 
   constructor(db?: OutboxDatabase, autoStart: boolean = true) {
     this.db = db || new OutboxDatabase();
-    if (autoStart) this.startBackgroundPoller(pollIntervalFromEnv());
+    if (autoStart) this.startBackgroundPoller(pollIntervalFromEnv(process.env.POLL_INTERVAL_MS));
   }
 
   public startBackgroundPoller(intervalMs: number = 2500): void {
@@ -115,7 +115,8 @@ export class OutboxService {
   }
 }
 
-function pollIntervalFromEnv(): number {
-  const parsed = Number.parseInt(process.env.POLL_INTERVAL_MS ?? '', 10);
-  return Number.isInteger(parsed) && parsed >= 100 ? parsed : 2500;
+export function pollIntervalFromEnv(value: string | undefined): number {
+  if (value === undefined || !/^[1-9]\d*$/.test(value)) return 2500;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 100 && parsed <= 2_147_483_647 ? parsed : 2500;
 }

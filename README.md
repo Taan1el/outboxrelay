@@ -61,7 +61,7 @@ No variable is required for the defaults above.
 |---|---|---|---|
 | `PORT` | server | `4003` | Port the Express server listens on. See `server/.env.example`. |
 | `OUTBOXRELAY_DB_PATH` | server | `data/outbox.db` at the repository root | SQLite database file. |
-| `POLL_INTERVAL_MS` | server | `2500` | Milliseconds between automatic relay cycles (minimum 100). |
+| `POLL_INTERVAL_MS` | server | `2500` | Whole milliseconds between automatic relay cycles (100 to 2,147,483,647); invalid values use the default. |
 | `VITE_API_TARGET` | client (dev only) | `http://localhost:4003` | Where the Vite dev server proxies `/api`. See `client/.env.example`. |
 
 The server does not load `.env` files itself; export the variables or start Node with `--env-file`.
