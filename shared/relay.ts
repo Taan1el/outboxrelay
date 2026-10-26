@@ -4,8 +4,9 @@ import { CONSUMER_IDS, failureMessage, shouldSimulateFailure, validatePollOption
 /** The storage operations one relay cycle needs; the SQLite database and the in-browser store both provide them. */
 export interface RelayStore {
   leasePendingEvents(leaseSeconds: number, limit: number): OutboxEvent[];
-  markEventPublished(eventId: string): void;
-  markEventFailed(eventId: string, errorMessage: string): { status: 'PENDING' | 'DEAD_LETTER'; retries: number };
+  ownsLease(eventId: string, leasedUntil: number): boolean;
+  markEventPublished(eventId: string, leasedUntil?: number): void;
+  markEventFailed(eventId: string, errorMessage: string, maxRetries?: number, leasedUntil?: number): { status: 'PENDING' | 'DEAD_LETTER'; retries: number };
   recordConsumerInbox(eventId: string, consumerId: string, eventType: string): { duplicate: boolean };
 }
 
@@ -39,17 +40,20 @@ export async function runRelayCycle(
 
   for (const event of leased) {
     if (faults.simulatedLatencyMs > 0) await env.sleep(faults.simulatedLatencyMs);
+    if (event.leasedUntil === null || !store.ownsLease(event.id, event.leasedUntil)) continue;
 
     if (shouldSimulateFailure(faults, env.random)) {
       failedCount++;
-      const { status } = store.markEventFailed(event.id, failureMessage(faults.mode));
+      const { status } = store.markEventFailed(event.id, failureMessage(faults.mode), undefined, event.leasedUntil);
       if (status === 'DEAD_LETTER') deadLetterCount++;
     } else {
       for (const consumerId of CONSUMER_IDS) {
+        if (!store.ownsLease(event.id, event.leasedUntil)) break;
         store.recordConsumerInbox(event.id, consumerId, event.eventType);
       }
+      if (!store.ownsLease(event.id, event.leasedUntil)) continue;
       // Keep the lease retryable if any receipt fails; existing receipts deduplicate on replay.
-      store.markEventPublished(event.id);
+      store.markEventPublished(event.id, event.leasedUntil);
       dispatchedCount++;
     }
   }

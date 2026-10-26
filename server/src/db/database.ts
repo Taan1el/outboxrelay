@@ -244,24 +244,34 @@ export class OutboxDatabase {
     }
   }
 
-  public markEventPublished(eventId: string): void {
+  public ownsLease(eventId: string, leasedUntil: number): boolean {
+    return Boolean(this.db.prepare(`
+      SELECT 1 FROM outbox_events WHERE id = ? AND status = 'LEASED'
+        AND leased_until = ? AND leased_until >= ?
+    `).get(eventId, leasedUntil, Date.now()));
+  }
+
+  public markEventPublished(eventId: string, leasedUntil?: number): void {
     const now = new Date().toISOString();
     const stmt = this.db.prepare(`
       UPDATE outbox_events
       SET status = 'PUBLISHED', published_at = ?, leased_until = NULL, available_at = NULL, error_message = NULL
-      WHERE id = ?
+      WHERE id = ? AND (? IS NULL OR (status = 'LEASED' AND leased_until = ? AND leased_until >= ?))
     `);
-    stmt.run(now, eventId);
+    stmt.run(now, eventId, leasedUntil ?? null, leasedUntil ?? null, Date.now());
   }
 
-  public markEventFailed(eventId: string, errorMessage: string, maxRetries: number = MAX_ATTEMPTS): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
+  public markEventFailed(eventId: string, errorMessage: string, maxRetries: number = MAX_ATTEMPTS, leasedUntil?: number): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
     const eventRow = this.db.prepare('SELECT retry_count FROM outbox_events WHERE id = ?').get(eventId) as { retry_count: number } | undefined;
+    if (leasedUntil !== undefined && !this.ownsLease(eventId, leasedUntil)) {
+      return { status: 'PENDING', retries: eventRow?.retry_count ?? 0 };
+    }
     const plan = planFailure(eventRow ? eventRow.retry_count : 0, Date.now(), maxRetries);
     this.db.prepare(`
       UPDATE outbox_events
       SET status = ?, retry_count = ?, leased_until = NULL, available_at = ?, error_message = ?
-      WHERE id = ?
-    `).run(plan.status, plan.retryCount, plan.availableAt, errorMessage, eventId);
+      WHERE id = ? AND (? IS NULL OR (status = 'LEASED' AND leased_until = ? AND leased_until >= ?))
+    `).run(plan.status, plan.retryCount, plan.availableAt, errorMessage, eventId, leasedUntil ?? null, leasedUntil ?? null, Date.now());
     return { status: plan.status, retries: plan.retryCount };
   }
 

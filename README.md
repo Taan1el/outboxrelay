@@ -38,6 +38,7 @@ Delivery is **at-least-once**, not exactly-once.
 - A leased row becomes due again when `leased_until` has passed (5 seconds by default, 1 to 300 through the poll endpoint). The next cycle delivers it again. The same happens if a delivery takes longer than the lease.
 - Because of that, a consumer can receive an event twice. The consumer inbox ignores the repeat, so the effect of an event is applied once as long as the consumer records the inbox entry and does its own work in one transaction. The simulated consumers here only write the inbox entry.
 - Leasing runs in a transaction, so two cycles in one process, or two processes sharing the database file, do not lease the same row at the same time.
+- A cycle checks its lease before recording consumer receipts. Publication and failure updates also require the same active lease, so a late cycle cannot overwrite an event reclaimed by another cycle.
 
 ## Getting started
 

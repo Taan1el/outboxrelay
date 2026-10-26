@@ -55,7 +55,13 @@ export class InMemoryOutbox implements RelayStore {
     return due.map((e) => ({ ...e, payload: { ...e.payload } }));
   }
 
-  markEventPublished(eventId: string): void {
+  ownsLease(eventId: string, leasedUntil: number): boolean {
+    return this.events.some((event) => event.id === eventId && event.status === 'LEASED'
+      && event.leasedUntil === leasedUntil && leasedUntil >= this.clock());
+  }
+
+  markEventPublished(eventId: string, leasedUntil?: number): void {
+    if (leasedUntil !== undefined && !this.ownsLease(eventId, leasedUntil)) return;
     const event = this.events.find((e) => e.id === eventId);
     if (!event) return;
     event.status = 'PUBLISHED';
@@ -65,8 +71,11 @@ export class InMemoryOutbox implements RelayStore {
     event.errorMessage = null;
   }
 
-  markEventFailed(eventId: string, errorMessage: string, maxRetries: number = MAX_ATTEMPTS): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
+  markEventFailed(eventId: string, errorMessage: string, maxRetries: number = MAX_ATTEMPTS, leasedUntil?: number): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
     const event = this.events.find((e) => e.id === eventId);
+    if (leasedUntil !== undefined && !this.ownsLease(eventId, leasedUntil)) {
+      return { status: 'PENDING', retries: event?.retryCount ?? 0 };
+    }
     const plan = planFailure(event ? event.retryCount : 0, this.clock(), maxRetries);
     if (event) {
       event.status = plan.status;
