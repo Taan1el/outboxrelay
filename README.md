@@ -21,6 +21,7 @@ More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/0
 ## Features
 
 - **Atomic write.** The order row and its outbox row are inserted in one SQLite transaction (`BEGIN IMMEDIATE`); if either insert fails, neither is stored.
+- **Unique order identity.** Server-created orders and their outbox events use UUID-based IDs, so concurrent requests do not depend on clock or `Math.random()` values for uniqueness.
 - **Row leasing.** A poller sets due rows to `LEASED` with a `leased_until` time. A lease that expires without an outcome makes the row due again.
 - **Retries with backoff.** A failed delivery is retried after 2 seconds, then 4 seconds. The third failed attempt moves the event to `DEAD_LETTER`.
 - **Dead-letter queue.** Dead-lettered events keep their last error and can be replayed, which resets their attempts.

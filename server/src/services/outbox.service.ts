@@ -1,4 +1,5 @@
 import { OutboxDatabase } from '../db/database.js';
+import { randomUUID } from 'node:crypto';
 import type {
   Order,
   OutboxEvent,
@@ -61,7 +62,7 @@ export class OutboxService {
    * exist or neither does.
    */
   public createOrder(payload: CreateOrderPayload): { order: Order; event: OutboxEvent } {
-    const stamp = `${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const stamp = randomUUID();
     const result = buildOrderWithEvent(payload, { orderId: `ord_${stamp}`, eventId: `evt_${stamp}` }, new Date());
     this.db.createOrderWithOutboxEvent(result.order, result.event);
     return result;
