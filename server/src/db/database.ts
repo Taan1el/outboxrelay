@@ -290,25 +290,17 @@ export class OutboxDatabase {
    * If already processed by the consumer, increments duplicate_detected.
    */
   public recordConsumerInbox(eventId: string, consumerId: string, eventType: string): { duplicate: boolean } {
-    const existing = this.db.prepare(
-      'SELECT id, duplicate_detected FROM consumer_inbox WHERE event_id = ? AND consumer_id = ?'
-    ).get(eventId, consumerId) as { id: string; duplicate_detected: number } | undefined;
-
-    if (existing) {
-      this.db.prepare(
-        'UPDATE consumer_inbox SET duplicate_detected = duplicate_detected + 1 WHERE id = ?'
-      ).run(existing.id);
-      return { duplicate: true };
-    }
-
     const id = `inbox_${randomUUID()}`;
     const now = new Date().toISOString();
-    this.db.prepare(`
+    const row = this.db.prepare(`
       INSERT INTO consumer_inbox (id, event_id, consumer_id, event_type, processed_at, duplicate_detected)
       VALUES (?, ?, ?, ?, ?, 0)
-    `).run(id, eventId, consumerId, eventType, now);
+      ON CONFLICT(event_id, consumer_id) DO UPDATE
+      SET duplicate_detected = duplicate_detected + 1
+      RETURNING duplicate_detected
+    `).get(id, eventId, consumerId, eventType, now) as { duplicate_detected: number };
 
-    return { duplicate: false };
+    return { duplicate: row.duplicate_detected > 0 };
   }
 
   public getOrders(): Order[] {

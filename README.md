@@ -25,7 +25,7 @@ More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/0
 - **Row leasing.** A poller sets due rows to `LEASED` with a `leased_until` time. A lease that expires without an outcome makes the row due again.
 - **Retries with backoff.** A failed delivery is retried after 2 seconds, then 4 seconds. The third failed attempt moves the event to `DEAD_LETTER`.
 - **Dead-letter queue.** Dead-lettered events keep their last error and can be replayed, which resets their attempts.
-- **Consumer inbox.** Each consumer records `(event id, consumer)` once. A repeated delivery is counted and ignored.
+- **Consumer inbox.** Each consumer records `(event id, consumer)` once. SQLite records or counts a repeated delivery in one atomic statement, including when relay workers use separate connections. A repeated delivery is counted and ignored.
   Receipt IDs are opaque: SQLite uses UUIDs, while the browser store allocates sequential IDs without reusing seeded receipt IDs. Existing receipt IDs remain unchanged.
 - **Fault simulator.** Switch the broker between healthy, partial failures (half of the deliveries fail) and full outage, and set the delivery latency.
 - **Browser demo** for GitHub Pages with a demo bar and a reset control.
