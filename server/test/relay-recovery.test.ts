@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { OutboxDatabase } from '../src/db/database.js';
 import { InMemoryOutbox } from '../../shared/in-memory-outbox.js';
 import { buildOrderWithEvent, CONSUMER_IDS } from '../../shared/outbox-logic.js';
@@ -56,4 +59,58 @@ describe.each(['sqlite', 'memory'] as const)('%s relay receipt recovery', (kind)
     expect(store.getOutboxEvents().find((row) => row.id === event.id)?.status).toBe('PUBLISHED');
     await expect(cycle()).resolves.toMatchObject({ leasedCount: 0 });
   });
+});
+
+it('recovers durable partial receipts after reopening the database', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const now = Date.parse('2026-10-30T06:00:00Z');
+  vi.setSystemTime(now);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'outbox-restart-'));
+  const dbPath = path.join(dir, 'outbox.sqlite');
+  let db: OutboxDatabase | undefined;
+  const cycle = (store: OutboxDatabase) => runRelayCycle(store,
+    { mode: 'HEALTHY', failureRatePercent: 0, simulatedLatencyMs: 0 }, {},
+    { now: Date.now, random: () => 0, sleep: async () => {} },
+    { batchSize: 1, leaseSeconds: 5 });
+
+  try {
+    db = new OutboxDatabase(dbPath);
+    db.leasePendingEvents(300, 100);
+    const { order, event } = buildOrderWithEvent(
+      { customerId: 'restart', items: [{ name: 'Parcel', quantity: 1, unitPriceEur: 10 }] },
+      { orderId: 'order_restart', eventId: 'event_restart' }, new Date(now),
+    );
+    db.createOrderWithOutboxEvent(order, event);
+    const record = db.recordConsumerInbox.bind(db);
+    let writes = 0;
+    vi.spyOn(db, 'recordConsumerInbox').mockImplementation((...args) => {
+      if (writes++ === 1) throw new Error('Receipt storage unavailable');
+      return record(...args);
+    });
+
+    await expect(cycle(db)).rejects.toThrow('Receipt storage unavailable');
+    const originalReceipt = db.getConsumerInbox().find((row) => row.eventId === event.id);
+    expect(originalReceipt?.consumerId).toBe(CONSUMER_IDS[0]);
+    db.close();
+    db = new OutboxDatabase(dbPath);
+
+    expect(db.getConsumerInbox().filter((row) => row.eventId === event.id)).toEqual([originalReceipt]);
+    await expect(cycle(db)).resolves.toMatchObject({ leasedCount: 0 });
+    vi.setSystemTime(now + 5001);
+    await expect(cycle(db)).resolves.toMatchObject({ leasedCount: 1, dispatchedCount: 1 });
+    const receipts = db.getConsumerInbox().filter((row) => row.eventId === event.id);
+    expect(receipts.map((row) => row.consumerId).sort()).toEqual([...CONSUMER_IDS].sort());
+    expect(receipts.find((row) => row.consumerId === CONSUMER_IDS[0])).toMatchObject({
+      id: originalReceipt?.id, duplicateDetected: true,
+    });
+    expect(db.getOutboxEvents().find((row) => row.id === event.id)).toMatchObject({
+      status: 'PUBLISHED', retryCount: 0,
+    });
+    await expect(cycle(db)).resolves.toMatchObject({ leasedCount: 0 });
+  } finally {
+    db?.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  }
 });
