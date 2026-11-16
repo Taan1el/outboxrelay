@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- An event stays leased and retryable until every consumer receipt is stored, so a failed receipt write no longer leaves an event marked published with receipts missing.
+- A relay cycle checks that it still holds an event's lease before recording receipts or an outcome, so a late cycle cannot overwrite an event another cycle has reclaimed.
+- Consumer receipts are recorded or counted as duplicates in one atomic SQLite statement, which stays correct when relay workers use separate connections.
+- Orders, outbox events and consumer receipts use UUID-based IDs instead of clock and random values, and the browser demo no longer reuses seeded receipt IDs.
+- In partial-failure mode, a fault-config update that only sends a failure rate now applies it, and resubmitting the mode without a rate keeps the current rate instead of resetting it to 50.
+- `POLL_INTERVAL_MS` accepts whole numbers from 100 to 2,147,483,647 and falls back to the default for anything else.
 - The orders table and the opened payload block can scroll sideways or vertically on narrow screens; both can now be reached and scrolled with the keyboard, with a visible focus outline.
 
 ### Added
