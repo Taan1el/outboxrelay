@@ -739,6 +739,133 @@ textarea {
   flex-basis: 100%;
 }
 
+/* Dead-letter inspector */
+.inspector {
+  background-color: var(--surface);
+  border: 1px solid var(--rule-strong);
+  padding: 1.5rem;
+  min-width: 0;
+}
+
+.inspector-sources,
+.inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.inspector-format {
+  margin-top: 0.75rem;
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.inspector-format code {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.inspector .alert {
+  margin-top: 0.75rem;
+}
+
+.error-groups {
+  list-style: none;
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--rule-strong);
+}
+
+.error-group {
+  padding: 0.6rem 0;
+  border-bottom: 1px dashed var(--rule-strong);
+}
+
+.check-option {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-right: 0.75rem;
+  border: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.check-option.selected {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Custom checkbox: the input box is 44px, the drawn glyph 18px, as with the radios. */
+.check-option input[type='checkbox'] {
+  appearance: none;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.check-option input[type='checkbox']::before {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--ink-3);
+  background-color: var(--surface);
+}
+
+.check-option input[type='checkbox']:checked::before {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M4 9.5l3.2 3L14 5.5' fill='none' stroke='%23fffaf1' stroke-width='2'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+}
+
+.error-group-text {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0;
+}
+
+.error-group-text strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.error-group-text small {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.error-group-count {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.error-group-ids {
+  margin: 0.35rem 0 0 calc(44px + 0.25rem);
+  font-size: 12px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.inspector-actions {
+  margin-top: 1rem;
+}
+
+.inspector-selection {
+  font-size: 13px;
+  margin-right: auto;
+}
+
 /* Footer */
 .app-footer {
   max-width: 1200px;
@@ -826,7 +953,8 @@ textarea {
   }
 
   .below > section,
-  .below-col > section {
+  .below-col > section,
+  .inspector {
     padding: 1.1rem;
   }
 

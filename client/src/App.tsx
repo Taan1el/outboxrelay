@@ -7,6 +7,7 @@ import { Pipeline } from './components/Pipeline.js';
 import { OrdersPanel } from './components/OrdersPanel.js';
 import { ConsumerFleet } from './components/ConsumerFleet.js';
 import { FaultSimulator } from './components/FaultSimulator.js';
+import { DeadLetterInspector } from './components/DeadLetterInspector.js';
 import './App.css';
 
 export const REFRESH_INTERVAL_MS = 2500;
@@ -88,6 +89,8 @@ export const App: React.FC = () => {
             onConfigChanged={() => void loadData()}
           />
         </div>
+
+        <DeadLetterInspector events={events} />
       </main>
 
       <footer className="app-footer">
