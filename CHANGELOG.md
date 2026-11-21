@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The orders table and the opened payload block can scroll sideways or vertically on narrow screens; both can now be reached and scrolled with the keyboard, with a visible focus outline.
 
 ### Added
+- An "Inspect dead letters" panel: load the dead-letter lane or a JSON or CSV file (`id,type,payload,retry_count,last_error`, or a saved dead-letter events response), see the events grouped by their last error with similar timeouts and ids merged, select the groups to replay and export their ids as JSON or CSV. A file with a problem is rejected with the file name, row and field. Files stay in the browser.
 - A test that checks every scrollable container is a labelled, focusable region.
 - Automated accessibility checks for the four lanes, the orders and consumers panels, the fault simulator and an opened row detail, run with axe-core against the WCAG 2 A and AA rules. They found no violations, so no product code changed. Color contrast is checked outside the test suite because jsdom cannot compute colors.
 

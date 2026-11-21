@@ -16,7 +16,7 @@ The demo runs entirely in your browser. The same relay, backoff and validation c
 
 ![Four pipeline lanes: pending, leased, published and dead letter](docs/screenshots/01-dashboard.png)
 
-More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/02-consumers-and-dead-letters.png), [the fault simulator after a full outage](docs/screenshots/03-fault-simulator.png), [the console at phone width](docs/screenshots/04-mobile.png).
+More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/02-consumers-and-dead-letters.png), [the fault simulator after a full outage](docs/screenshots/03-fault-simulator.png), [the console at phone width](docs/screenshots/04-mobile.png), [the dead-letter inspector with one error group selected](docs/screenshots/05-dead-letter-inspector.png).
 
 ## Features
 
@@ -28,7 +28,19 @@ More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/0
 - **Consumer inbox.** Each consumer records `(event id, consumer)` once. SQLite records or counts a repeated delivery in one atomic statement, including when relay workers use separate connections. A repeated delivery is counted and ignored.
   Receipt IDs are opaque: SQLite uses UUIDs, while the browser store allocates sequential IDs without reusing seeded receipt IDs. Existing receipt IDs remain unchanged.
 - **Fault simulator.** Switch the broker between healthy, partial failures (half of the deliveries fail) and full outage, and set the delivery latency.
+- **Dead-letter inspector.** Load the dead-letter lane or a JSON or CSV export, see the events grouped by their last error, pick the groups to replay and export their ids. See [Inspecting dead letters](#inspecting-dead-letters).
 - **Browser demo** for GitHub Pages with a demo bar and a reset control.
+
+## Inspecting dead letters
+
+The "Inspect dead letters" panel below the fault simulator helps decide what to replay after an outage. It works the same against the API and in the browser demo.
+
+- **Input:** the current dead-letter lane, or a file you choose. CSV needs the columns `id,type,payload,retry_count,last_error` in any order (quoted fields, CRLF or LF rows; `payload` is read as JSON when it parses). JSON is an array of objects with the same fields, or a saved `GET /api/outbox/events?status=DEAD_LETTER` response, whose `eventType`, `retryCount` and `errorMessage` fields are accepted as well. Files up to 5 MB and 10,000 rows.
+- **Checks:** a wrong file is rejected whole, with the file name, the row or item and the field at fault, for example `dead.csv, row 3, retry_count: expected a whole number of 0 or more, found "-1".` Repeated ids are rejected.
+- **Grouping:** events are grouped by their last error after durations, sizes, long numbers and identifiers are replaced with `<n>` and `<id>`, so `Broker timeout after 3012 ms` and `Broker timeout after 2990 ms` share a group. Short numbers such as HTTP status codes are kept, so a 503 and a 504 stay apart. The largest group comes first, with its event types and attempt range.
+- **Output:** `dead-letter-replay.json` (an array of event ids) or `dead-letter-replay.csv` (the import columns, so the list can be loaded again) for the selected groups.
+
+Files are read in the browser and never uploaded. The panel does not replay anything itself; replay events from the dead-letter lane or with `POST /api/outbox/events/:id/retry`.
 
 ## Delivery guarantees
 
@@ -108,6 +120,7 @@ server/    Express API and SQLite store
   test/    route, validation, store and parity tests
 client/    React 19 console (Vite)
   src/components, src/services (api.ts, demoApi.ts, index.ts), src/styles, src/test
+  src/utils  formatting and the dead-letter file reader and grouping (deadLetters.ts)
 docs/      ADRs and screenshots
 ```
 
@@ -144,8 +157,8 @@ npm test
 ```
 
 - **Server** (Vitest and Supertest): routes and validation, transaction rollback, leasing and lease expiry, backoff timing, dead-lettering and replay, the consumer inbox, a migration from a database without `available_at`, the background poller, path resolution, and parity between the SQLite and in-memory stores.
-- **Client** (Vitest and React Testing Library): the tally, the four lanes with their row counts, the show-all toggle, the dead-letter replay, the order form, the fault simulator, error handling, the refresh timer, the browser demo API and the demo bar.
-- **Accessibility** (axe-core through vitest-axe): the suite includes automated accessibility checks for the lanes, the orders and consumers panels, the fault simulator and an opened row detail, using the WCAG 2 A and AA rules. jsdom cannot compute colors, so color contrast is checked outside jsdom.
+- **Client** (Vitest and React Testing Library): the tally, the four lanes with their row counts, the show-all toggle, the dead-letter replay, the order form, the fault simulator, error handling, the refresh timer, the browser demo API, the demo bar, and the dead-letter inspector (CSV and JSON parsing with its error messages, error grouping, replay list export and the delayed release of the download URL).
+- **Accessibility** (axe-core through vitest-axe): the suite includes automated accessibility checks for the lanes, the orders and consumers panels, the fault simulator, an opened row detail and the dead-letter inspector with groups loaded, using the WCAG 2 A and AA rules. jsdom cannot compute colors, so color contrast is checked outside jsdom.
 
 Tests that depend on time use fake timers; none of them sleep.
 
@@ -177,6 +190,7 @@ The image builds the server and the client, runs as the unprivileged `node` user
 - Pruning for published rows and consumer inbox entries.
 - Authentication for the API.
 - Metrics for cycle duration and queue age.
+- Replay a selected error group from the dead-letter inspector in one step, with a confirmation that states the count.
 
 ## License
 
