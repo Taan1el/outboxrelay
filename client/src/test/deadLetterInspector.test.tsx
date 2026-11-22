@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DeadLetterInspector } from '../components/DeadLetterInspector.js';
 import { REVOKE_DELAY_MS } from '../utils/download.js';
 import { axe } from './axe.js';
 import type { OutboxEvent } from '../../../shared/types.js';
+
+const services = vi.hoisted(() => ({ retryDeadLetters: vi.fn() }));
+vi.mock('../services/index.js', () => services);
 
 const base = {
   aggregateType: 'Order',
@@ -46,6 +49,7 @@ let downloads: Array<{ name: string; text: Promise<string> }>;
 let revoked: string[];
 
 beforeEach(() => {
+  services.retryDeadLetters.mockReset();
   downloads = [];
   revoked = [];
   let pending: Blob | null = null;
@@ -180,4 +184,127 @@ describe('DeadLetterInspector', () => {
 
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  describe('replaying selected groups', () => {
+    it('asks for confirmation with the counts, replays, and reloads the lanes', async () => {
+      const user = userEvent.setup();
+      const onReplayed = vi.fn();
+      services.retryDeadLetters.mockResolvedValue({ retried: ['evt_dead_1', 'evt_dead_2'], skipped: [] });
+      render(<DeadLetterInspector events={events} onReplayed={onReplayed} />);
+      await user.click(screen.getByRole('button', { name: 'Use the dead-letter lane (2)' }));
+      expect(screen.getByRole('button', { name: 'Replay selected' })).toBeDisabled();
+
+      await user.click(screen.getByRole('checkbox', { name: /Broker refused connection/ }));
+      await user.click(screen.getByRole('button', { name: 'Replay selected' }));
+
+      const prompt = screen.getByRole('group', { name: /^Replay 2 events from 1 error group\?/ });
+      expect(within(prompt).getByRole('button', { name: 'Replay 2 events' })).toHaveFocus();
+      expect(services.retryDeadLetters).not.toHaveBeenCalled();
+
+      await user.click(within(prompt).getByRole('button', { name: 'Replay 2 events' }));
+
+      expect(services.retryDeadLetters).toHaveBeenCalledWith(['evt_dead_1', 'evt_dead_2']);
+      expect(await screen.findByText('Replayed 2 events; the relay delivers them on its next cycle.')).toBeInTheDocument();
+      expect(onReplayed).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('group', { name: /^Replay/ })).not.toBeInTheDocument();
+      expect(screen.getByText('All 2 loaded events have been replayed.')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Inspect dead letters' })).toHaveFocus());
+    });
+
+    it('cancels without sending anything and returns focus to the replay button', async () => {
+      const user = userEvent.setup();
+      render(<DeadLetterInspector events={events} />);
+      await user.click(screen.getByRole('button', { name: 'Use the dead-letter lane (2)' }));
+      await user.click(screen.getByRole('checkbox', { name: /Broker refused connection/ }));
+      await user.click(screen.getByRole('button', { name: 'Replay selected' }));
+
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByRole('group', { name: /^Replay/ })).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Replay selected' })).toHaveFocus());
+      expect(services.retryDeadLetters).not.toHaveBeenCalled();
+      expect(screen.getByText('2 of 2 selected')).toBeInTheDocument();
+    });
+
+    it('closes the confirmation when the selection changes', async () => {
+      const user = userEvent.setup();
+      render(<DeadLetterInspector events={events} />);
+      await user.upload(fileInput(), new File([csv], 'dead.csv', { type: 'text/csv' }));
+      await user.click(await screen.findByRole('checkbox', { name: /HTTP 503/ }));
+      await user.click(screen.getByRole('button', { name: 'Replay selected' }));
+      expect(screen.getByRole('group', { name: /^Replay 1 event from 1 error group\?/ })).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Select all groups' }));
+
+      expect(screen.queryByRole('group', { name: /^Replay/ })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Replay selected' }));
+      expect(screen.getByRole('group', { name: /^Replay 3 events from 2 error groups\?/ })).toBeInTheDocument();
+    });
+
+    it('reports ids that were not dead-lettered and keeps them in their groups', async () => {
+      const user = userEvent.setup();
+      const onReplayed = vi.fn();
+      services.retryDeadLetters.mockResolvedValue({ retried: ['evt_3'], skipped: ['evt_1', 'evt_2'] });
+      render(<DeadLetterInspector events={events} onReplayed={onReplayed} />);
+      await user.upload(fileInput(), new File([csv], 'dead.csv', { type: 'text/csv' }));
+      await user.click(await screen.findByRole('button', { name: 'Select all groups' }));
+      await user.click(screen.getByRole('button', { name: 'Replay selected' }));
+      await user.click(screen.getByRole('button', { name: 'Replay 3 events' }));
+
+      expect(
+        await screen.findByText(
+          'Replayed 1 event; the relay delivers it on its next cycle. Skipped 2 events that were not dead-lettered.',
+        ),
+      ).toBeInTheDocument();
+      const groups = within(screen.getByRole('list', { name: 'Error groups' })).getAllByRole('listitem');
+      expect(groups).toHaveLength(1);
+      expect(groups[0]).toHaveTextContent('Broker timeout after <n> ms');
+      expect(screen.getByText('0 of 2 selected')).toBeInTheDocument();
+      expect(onReplayed).toHaveBeenCalledTimes(1);
+    });
+
+    it('says nothing was replayed when every id was skipped', async () => {
+      const user = userEvent.setup();
+      const onReplayed = vi.fn();
+      services.retryDeadLetters.mockResolvedValue({ retried: [], skipped: ['evt_3'] });
+      render(<DeadLetterInspector events={events} onReplayed={onReplayed} />);
+      await user.upload(fileInput(), new File([csv], 'dead.csv', { type: 'text/csv' }));
+      await user.click(await screen.findByRole('checkbox', { name: /HTTP 503/ }));
+      await user.click(screen.getByRole('button', { name: 'Replay selected' }));
+      await user.click(screen.getByRole('button', { name: 'Replay 1 event' }));
+
+      expect(
+        await screen.findByText('No events were replayed. Skipped 1 event that was not dead-lettered.'),
+      ).toBeInTheDocument();
+      expect(screen.getByText('1 of 3 selected')).toBeInTheDocument();
+      expect(onReplayed).not.toHaveBeenCalled();
+    });
+
+    it('shows the error and keeps every group when the replay request fails', async () => {
+      const user = userEvent.setup();
+      const onReplayed = vi.fn();
+      services.retryDeadLetters.mockRejectedValue(new Error('Failed to replay events: 503'));
+      render(<DeadLetterInspector events={events} onReplayed={onReplayed} />);
+      await user.upload(fileInput(), new File([csv], 'dead.csv', { type: 'text/csv' }));
+      await user.click(await screen.findByRole('checkbox', { name: /Broker timeout after <n> ms/ }));
+      await user.click(screen.getByRole('button', { name: 'Replay selected' }));
+      await user.click(screen.getByRole('button', { name: 'Replay 2 events' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('The replay stopped: Failed to replay events: 503.');
+      expect(within(screen.getByRole('list', { name: 'Error groups' })).getAllByRole('listitem')).toHaveLength(2);
+      expect(screen.getByText('2 of 3 selected')).toBeInTheDocument();
+      expect(onReplayed).not.toHaveBeenCalled();
+    });
+
+    it('has no accessibility violations while the confirmation is open', async () => {
+      const user = userEvent.setup();
+      const { container } = render(<DeadLetterInspector events={events} />);
+      await user.click(screen.getByRole('button', { name: 'Use the dead-letter lane (2)' }));
+      await user.click(screen.getByRole('checkbox', { name: /Broker refused connection/ }));
+      await user.click(screen.getByRole('button', { name: 'Replay selected' }));
+
+      expect(await axe(container)).toHaveNoViolations();
+    });
+  });
 });
+

@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - An "Inspect dead letters" panel: load the dead-letter lane or a JSON or CSV file (`id,type,payload,retry_count,last_error`, or a saved dead-letter events response), see the events grouped by their last error with similar timeouts and ids merged, select the groups to replay and export their ids as JSON or CSV. A file with a problem is rejected with the file name, row and field. Files stay in the browser.
+- Replay selected error groups from the inspector in one step: a confirmation states the event and group counts, the ids go to the new `POST /api/outbox/dead-letters/retry` endpoint (up to 500 per request, applied in one SQLite transaction, with the same behavior in the browser demo), and the panel reports how many were replayed and how many were skipped because they were no longer dead-lettered.
 - A test that checks every scrollable container is a labelled, focusable region.
 - Automated accessibility checks for the four lanes, the orders and consumers panels, the fault simulator and an opened row detail, run with axe-core against the WCAG 2 A and AA rules. They found no violations, so no product code changed. Color contrast is checked outside the test suite because jsdom cannot compute colors.
 

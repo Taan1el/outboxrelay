@@ -90,7 +90,7 @@ export const App: React.FC = () => {
           />
         </div>
 
-        <DeadLetterInspector events={events} />
+        <DeadLetterInspector events={events} onReplayed={() => void loadData()} />
       </main>
 
       <footer className="app-footer">

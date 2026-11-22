@@ -298,3 +298,43 @@ export function toReplayCsv(records: DeadLetterRecord[]): string {
 function csvCell(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
+
+export interface ReplayOutcome {
+  retried: string[];
+  skipped: string[];
+}
+
+/** A failed batch, carrying what the earlier batches already replayed. */
+export class ReplayBatchError extends Error {
+  constructor(
+    message: string,
+    readonly partial: ReplayOutcome,
+  ) {
+    super(message);
+    this.name = 'ReplayBatchError';
+  }
+}
+
+/**
+ * Sends ids to `send` in batches no larger than `batchSize`, one batch at a time, and
+ * merges the results. Duplicate ids are sent once. A failed batch stops the run with a
+ * ReplayBatchError, so the caller can report what was already replayed.
+ */
+export async function replayInBatches(
+  ids: string[],
+  batchSize: number,
+  send: (batch: string[]) => Promise<ReplayOutcome>,
+): Promise<ReplayOutcome> {
+  const unique = [...new Set(ids)];
+  const done: ReplayOutcome = { retried: [], skipped: [] };
+  for (let start = 0; start < unique.length; start += batchSize) {
+    try {
+      const result = await send(unique.slice(start, start + batchSize));
+      done.retried.push(...result.retried);
+      done.skipped.push(...result.skipped);
+    } catch (err) {
+      throw new ReplayBatchError(err instanceof Error ? err.message : 'the request failed', done);
+    }
+  }
+  return done;
+}

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   DeadLetterParseError,
   NO_ERROR_KEY,
@@ -6,6 +6,8 @@ import {
   groupByError,
   normalizeError,
   parseDeadLetterFile,
+  replayInBatches,
+  ReplayBatchError,
   toReplayCsv,
   toReplayJson,
   type DeadLetterRecord,
@@ -211,5 +213,39 @@ describe('fromOutboxEvents', () => {
     expect(fromOutboxEvents(events)).toEqual([
       { id: 'evt_dead', type: 'ORDER_CREATED', payload: { totalEur: 10 }, retryCount: 3, lastError: 'Connection refused' },
     ]);
+  });
+});
+
+describe('replayInBatches', () => {
+  it('sends unique ids in batches and merges the results in order', async () => {
+    const ids = Array.from({ length: 1201 }, (_, i) => `evt_${i}`);
+    const send = vi.fn(async (batch: string[]) => ({
+      retried: batch.filter((id) => !id.endsWith('7')),
+      skipped: batch.filter((id) => id.endsWith('7')),
+    }));
+
+    const result = await replayInBatches([...ids, 'evt_0', 'evt_5'], 500, send);
+
+    expect(send.mock.calls.map(([batch]) => batch.length)).toEqual([500, 500, 201]);
+    expect(send.mock.calls[0][0][0]).toBe('evt_0');
+    expect(send.mock.calls[2][0].at(-1)).toBe('evt_1200');
+    expect(result.retried).toHaveLength(1201 - 120);
+    expect(result.skipped).toHaveLength(120);
+    expect(new Set([...result.retried, ...result.skipped]).size).toBe(1201);
+  });
+
+  it('stops at the first failed batch and reports what was already replayed', async () => {
+    const ids = ['a', 'b', 'c', 'd', 'e'];
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ retried: ['a'], skipped: ['b'] })
+      .mockRejectedValueOnce(new Error('Failed to replay events: 503'));
+
+    const error = await replayInBatches(ids, 2, send).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ReplayBatchError);
+    expect((error as ReplayBatchError).message).toBe('Failed to replay events: 503');
+    expect((error as ReplayBatchError).partial).toEqual({ retried: ['a'], skipped: ['b'] });
+    expect(send).toHaveBeenCalledTimes(2);
   });
 });

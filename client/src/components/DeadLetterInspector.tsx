@@ -1,12 +1,16 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { Download, FileUp, Inbox } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, FileUp, Inbox, RotateCcw } from 'lucide-react';
 import type { OutboxEvent } from '../../../shared/types.js';
+import { MAX_RETRY_BATCH } from '../../../shared/outbox-logic.js';
+import { retryDeadLetters } from '../services/index.js';
 import {
   DeadLetterParseError,
   MAX_FILE_BYTES,
   fromOutboxEvents,
   groupByError,
   parseDeadLetterFile,
+  replayInBatches,
+  ReplayBatchError,
   toReplayCsv,
   toReplayJson,
   type DeadLetterRecord,
@@ -17,30 +21,45 @@ import { formatCount } from '../utils/pluralize.js';
 
 interface DeadLetterInspectorProps {
   events: OutboxEvent[];
+  /** Called after a replay changed at least one event, so the lanes can reload. */
+  onReplayed?: () => void;
 }
 
 interface Loaded {
   source: string;
   records: DeadLetterRecord[];
+  /** How many loaded events have been replayed from this panel. */
+  replayed: number;
 }
 
 const PREVIEW_IDS = 4;
 
-export const DeadLetterInspector: React.FC<DeadLetterInspectorProps> = ({ events }) => {
+export const DeadLetterInspector: React.FC<DeadLetterInspectorProps> = ({ events, onReplayed }) => {
   const fileInput = useRef<HTMLInputElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const replayButton = useRef<HTMLButtonElement>(null);
+  const confirmButton = useRef<HTMLButtonElement>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [replaying, setReplaying] = useState(false);
 
   const laneRecords = useMemo(() => fromOutboxEvents(events), [events]);
   const groups = useMemo(() => (loaded ? groupByError(loaded.records) : []), [loaded]);
   const chosen = groups.filter((group) => selected.has(group.key)).flatMap((group) => group.records);
+  const chosenGroups = groups.filter((group) => selected.has(group.key)).length;
+
+  useEffect(() => {
+    if (confirming) confirmButton.current?.focus();
+  }, [confirming]);
 
   const show = (next: Loaded) => {
     const groupCount = groupByError(next.records).length;
     setLoaded(next);
     setSelected(new Set());
+    setConfirming(false);
     setError(null);
     setNotice(
       `Loaded ${formatCount(next.records.length, 'event')} in ${formatCount(groupCount, 'error group')} from ${next.source}.`,
@@ -48,7 +67,7 @@ export const DeadLetterInspector: React.FC<DeadLetterInspectorProps> = ({ events
   };
 
   const takeLane = () => {
-    show({ source: `the dead-letter lane at ${formatClock(Date.now())}`, records: laneRecords });
+    show({ source: `the dead-letter lane at ${formatClock(Date.now())}`, records: laneRecords, replayed: 0 });
   };
 
   const readFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -63,13 +82,14 @@ export const DeadLetterInspector: React.FC<DeadLetterInspectorProps> = ({ events
     }
     try {
       const records = parseDeadLetterFile(file.name, await file.text());
-      show({ source: file.name, records });
+      show({ source: file.name, records, replayed: 0 });
     } catch (err) {
       setError(err instanceof DeadLetterParseError ? err.message : `${file.name} could not be read.`);
     }
   };
 
   const toggle = (key: string) => {
+    setConfirming(false);
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
@@ -84,13 +104,66 @@ export const DeadLetterInspector: React.FC<DeadLetterInspectorProps> = ({ events
     setNotice(`Exported ${formatCount(chosen.length, 'event id')} as ${format.toUpperCase()}.`);
   };
 
+  const selectGroups = (keys: string[]) => {
+    setConfirming(false);
+    setSelected(new Set(keys));
+  };
+
+  const cancelReplay = () => {
+    setConfirming(false);
+    // The confirmation is gone, so focus goes back to the button that opened it.
+    requestAnimationFrame(() => replayButton.current?.focus());
+  };
+
+  const replay = async () => {
+    if (!loaded) return;
+    setReplaying(true);
+    setError(null);
+    setNotice('');
+    let outcome = { retried: [] as string[], skipped: [] as string[] };
+    try {
+      outcome = await replayInBatches(
+        chosen.map((record) => record.id),
+        MAX_RETRY_BATCH,
+        retryDeadLetters,
+      );
+    } catch (err) {
+      if (err instanceof ReplayBatchError) outcome = err.partial;
+      const done = outcome.retried.length > 0 ? ` ${formatCount(outcome.retried.length, 'event')} had been replayed before it stopped.` : '';
+      setError(`The replay stopped: ${err instanceof Error ? err.message : 'the request failed'}.${done}`);
+    }
+    const { retried, skipped } = outcome;
+    const replayedIds = new Set(retried);
+    setLoaded({
+      ...loaded,
+      records: loaded.records.filter((record) => !replayedIds.has(record.id)),
+      replayed: loaded.replayed + retried.length,
+    });
+    if (retried.length > 0) setSelected(new Set());
+    if (retried.length > 0 || skipped.length > 0) {
+      const skippedText =
+        skipped.length === 0
+          ? ''
+          : ` Skipped ${formatCount(skipped.length, 'event')} that ${skipped.length === 1 ? 'was' : 'were'} not dead-lettered.`;
+      const replayedText =
+        retried.length === 0
+          ? 'No events were replayed.'
+          : `Replayed ${formatCount(retried.length, 'event')}; the relay delivers ${retried.length === 1 ? 'it' : 'them'} on its next cycle.`;
+      setNotice(`${replayedText}${skippedText}`);
+    }
+    setReplaying(false);
+    setConfirming(false);
+    if (retried.length > 0) onReplayed?.();
+    requestAnimationFrame(() => heading.current?.focus());
+  };
+
   return (
     <section aria-labelledby="inspector-heading" className="inspector">
-      <h2 id="inspector-heading" className="section-heading">
+      <h2 id="inspector-heading" className="section-heading" ref={heading} tabIndex={-1}>
         Inspect dead letters
       </h2>
       <p className="section-description">
-        Group dead-lettered events by their last error, pick the failures you have fixed, and export their ids as a replay list. Files are read in this browser and never uploaded.
+        Group dead-lettered events by their last error, pick the failures you have fixed, then replay them here or export their ids as a replay list. Files are read in this browser and never uploaded.
       </p>
 
       <div className="inspector-sources">
@@ -125,7 +198,11 @@ export const DeadLetterInspector: React.FC<DeadLetterInspectorProps> = ({ events
 
       {loaded &&
         (groups.length === 0 ? (
-          <p className="empty-note">The dead-letter lane was empty when it was read.</p>
+          <p className="empty-note">
+            {loaded.replayed > 0
+              ? `All ${formatCount(loaded.replayed, 'loaded event')} have been replayed.`
+              : 'The dead-letter lane was empty when it was read.'}
+          </p>
         ) : (
           <>
             <ul className="error-groups" aria-label="Error groups">
@@ -157,15 +234,25 @@ export const DeadLetterInspector: React.FC<DeadLetterInspectorProps> = ({ events
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => setSelected(new Set(groups.map((group) => group.key)))}
+                onClick={() => selectGroups(groups.map((group) => group.key))}
                 disabled={selected.size === groups.length}
               >
                 Select all groups
               </button>
-              <button type="button" className="btn btn-secondary" onClick={() => setSelected(new Set())} disabled={selected.size === 0}>
+              <button type="button" className="btn btn-secondary" onClick={() => selectGroups([])} disabled={selected.size === 0}>
                 Clear selection
               </button>
-              <button type="button" className="btn btn-primary" onClick={() => exportList('json')} disabled={chosen.length === 0}>
+              <button
+                ref={replayButton}
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setConfirming(true)}
+                disabled={chosen.length === 0 || confirming || replaying}
+              >
+                <RotateCcw size={16} strokeWidth={1.75} aria-hidden="true" />
+                Replay selected
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => exportList('json')} disabled={chosen.length === 0}>
                 <Download size={16} strokeWidth={1.75} aria-hidden="true" />
                 Export replay list (JSON)
               </button>
@@ -173,6 +260,26 @@ export const DeadLetterInspector: React.FC<DeadLetterInspectorProps> = ({ events
                 Export as CSV
               </button>
             </div>
+
+            {confirming && (
+              <div className="replay-confirm" role="group" aria-labelledby="replay-confirm-text">
+                <p id="replay-confirm-text">
+                  {`Replay ${formatCount(chosen.length, 'event')} from ${formatCount(chosenGroups, 'error group')}? ${
+                    chosen.length === 1
+                      ? 'It goes back to pending with its attempts reset, and the relay delivers it'
+                      : 'They go back to pending with their attempts reset, and the relay delivers them'
+                  } on its next cycle. Ids that are no longer dead-lettered are skipped.`}
+                </p>
+                <div className="replay-confirm-actions">
+                  <button ref={confirmButton} type="button" className="btn btn-primary" onClick={() => void replay()} disabled={replaying}>
+                    {replaying ? 'Replaying' : `Replay ${formatCount(chosen.length, 'event')}`}
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={cancelReplay} disabled={replaying}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         ))}
     </section>

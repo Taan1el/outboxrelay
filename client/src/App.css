@@ -866,6 +866,27 @@ textarea {
   margin-right: auto;
 }
 
+/* Replay confirmation: an amber rule on the left, like a held lane. */
+.replay-confirm {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--rule-strong);
+  border-left: 3px solid var(--accent);
+  background-color: var(--accent-soft);
+}
+
+.replay-confirm p {
+  font-size: 14px;
+  max-width: 68ch;
+}
+
+.replay-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
 /* Footer */
 .app-footer {
   max-width: 1200px;
