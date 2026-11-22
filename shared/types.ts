@@ -69,6 +69,12 @@ export interface OutboxStats {
   brokerMode: 'HEALTHY' | 'PARTIAL_FAILURES' | 'FULL_OUTAGE';
 }
 
+/** Result of a batch replay: ids reset to PENDING, and ids that were not dead-lettered. */
+export interface RetryBatchResult {
+  retried: string[];
+  skipped: string[];
+}
+
 export interface PollCycleResult {
   leasedCount: number;
   dispatchedCount: number;

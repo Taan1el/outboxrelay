@@ -8,6 +8,7 @@ import type {
   ConsumerInboxItem,
   OutboxStats,
   PollCycleResult,
+  RetryBatchResult,
 } from '../../../shared/types.js';
 import {
   DEFAULT_BATCH_SIZE,
@@ -92,6 +93,10 @@ export class OutboxService {
 
   public retryDeadLetterEvent(eventId: string): boolean {
     return this.db.retryDeadLetterEvent(eventId);
+  }
+
+  public retryDeadLetterEvents(eventIds: string[]): RetryBatchResult {
+    return this.db.retryDeadLetterEvents(eventIds);
   }
 
   public setBrokerFaultConfig(config: Partial<BrokerFaultConfig>): BrokerFaultConfig {

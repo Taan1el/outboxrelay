@@ -87,6 +87,21 @@ describe('browser demo API', () => {
     await expect(demo.retryDeadLetter(dead[0].id)).rejects.toThrow(/not found/);
   });
 
+  it('replays a batch of dead letters and reports the ids it skipped', async () => {
+    const dead = await demo.fetchOutboxEvents('DEAD_LETTER');
+    expect(dead.length).toBeGreaterThanOrEqual(2);
+    const ids = dead.map((e) => e.id);
+
+    const result = await demo.retryDeadLetters([...ids, ids[0], 'evt_missing']);
+    expect(result).toEqual({ retried: ids, skipped: ['evt_missing'] });
+    expect(await demo.fetchOutboxEvents('DEAD_LETTER')).toHaveLength(0);
+    const pending = await demo.fetchOutboxEvents('PENDING');
+    expect(pending.filter((e) => ids.includes(e.id)).every((e) => e.retryCount === 0 && e.errorMessage === null)).toBe(true);
+
+    expect(await demo.retryDeadLetters(ids)).toEqual({ retried: [], skipped: ids });
+    await expect(demo.retryDeadLetters([])).rejects.toThrow(/non-empty array/);
+  });
+
   it('applies and validates broker settings', async () => {
     expect(await demo.updateBrokerFault({ mode: 'PARTIAL_FAILURES' })).toMatchObject({ failureRatePercent: 50 });
     expect((await demo.fetchStats()).brokerMode).toBe('PARTIAL_FAILURES');

@@ -19,6 +19,10 @@ export const MAX_LATENCY_MS = 5000;
 
 export const CONSUMER_IDS = ['consumer-notifications', 'consumer-inventory', 'consumer-analytics'] as const;
 
+/** Most event ids one batch replay request may carry. */
+export const MAX_RETRY_BATCH = 500;
+export const MAX_EVENT_ID_LENGTH = 100;
+
 export const BROKER_MODES = ['HEALTHY', 'PARTIAL_FAILURES', 'FULL_OUTAGE'] as const;
 
 export class PollOptionsError extends Error {}
@@ -144,6 +148,31 @@ export function validateOrderPayload(body: unknown): CreateOrderPayload {
     return { name: row.name, quantity: row.quantity, unitPriceEur: row.unitPriceEur };
   });
   return { customerId: customerId.trim(), items: cleaned, currency: currency as string | undefined };
+}
+
+/**
+ * Reads a batch replay request, `{ "ids": [...] }`. Duplicate ids are collapsed and the
+ * first-seen order is kept, so the result lists every id once.
+ */
+export function validateRetryBatch(body: unknown): string[] {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new ValidationError('Replay request must be a JSON object');
+  }
+  const { ids } = body as Record<string, unknown>;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new ValidationError('ids must be a non-empty array of event ids');
+  }
+  if (ids.length > MAX_RETRY_BATCH) {
+    throw new ValidationError(`ids may hold at most ${MAX_RETRY_BATCH} event ids per request`);
+  }
+  const unique = new Set<string>();
+  ids.forEach((id, index) => {
+    if (typeof id !== 'string' || id.trim() === '' || id.length > MAX_EVENT_ID_LENGTH) {
+      throw new ValidationError(`ids[${index}] must be a non-empty string of at most ${MAX_EVENT_ID_LENGTH} characters`);
+    }
+    unique.add(id);
+  });
+  return [...unique];
 }
 
 /** Builds the order row and the matching outbox event that are written together. */

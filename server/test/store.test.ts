@@ -170,6 +170,12 @@ describe('in-memory store parity with SQLite', () => {
     expect(strip(mem.getConsumerInbox())).toEqual(strip(db.getConsumerInbox()));
     expect(mem.getStats()).toEqual(db.getStats());
     expect(mem.getOutboxEvents('DEAD_LETTER').map((e) => e.id)).toEqual(['evt_11']);
+
+    const replays = both.map((s) => s.retryDeadLetterEvents(['evt_11', 'evt_10', 'evt_missing']));
+    expect(replays[0]).toEqual({ retried: ['evt_11'], skipped: ['evt_10', 'evt_missing'] });
+    expect(replays[1]).toEqual(replays[0]);
+    expect(mem.getOutboxEvents()).toEqual(db.getOutboxEvents());
+    expect(mem.getStats()).toEqual(db.getStats());
     db.close();
   });
 });

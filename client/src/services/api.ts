@@ -6,6 +6,7 @@ import type {
   ConsumerInboxItem,
   BrokerFaultConfig,
   PollCycleResult,
+  RetryBatchResult,
 } from '../../../shared/types.js';
 
 // BASE_URL is '/' normally; the API always lives at the site root, so only the demo build
@@ -46,6 +47,9 @@ export const triggerPoll = (): Promise<PollCycleResult> =>
 export async function retryDeadLetter(eventId: string): Promise<void> {
   await request(`/outbox/events/${encodeURIComponent(eventId)}/retry`, { method: 'POST' }, 'Failed to retry event');
 }
+
+export const retryDeadLetters = (ids: string[]): Promise<RetryBatchResult> =>
+  request('/outbox/dead-letters/retry', jsonPost({ ids }), 'Failed to replay events');
 
 export const fetchConsumerInbox = (): Promise<ConsumerInboxItem[]> =>
   request('/consumer/inbox', undefined, 'Failed to fetch consumer inbox');

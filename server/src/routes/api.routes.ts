@@ -30,6 +30,7 @@ export function createApiRouter(service: OutboxService): Router {
   router.get('/outbox/events', controller.getOutboxEvents);
   router.post('/outbox/poll', controller.triggerPoll);
   router.post('/outbox/events/:id/retry', controller.retryDeadLetter);
+  router.post('/outbox/dead-letters/retry', controller.retryDeadLetters);
 
   // Consumer Inbox Audit
   router.get('/consumer/inbox', controller.getConsumerInbox);

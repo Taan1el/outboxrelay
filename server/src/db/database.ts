@@ -2,9 +2,15 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import type { ConsumerInboxItem, ConsumerStats, Order, OutboxEvent, OutboxStats } from '../../../shared/types.js';
+import type { ConsumerInboxItem, ConsumerStats, Order, OutboxEvent, OutboxStats, RetryBatchResult } from '../../../shared/types.js';
 import { CONSUMER_IDS, MAX_ATTEMPTS, deliverySuccessRate, planFailure } from '../../../shared/outbox-logic.js';
 import { defaultDatabasePath } from '../lib/repoPaths.js';
+
+const RETRY_DEAD_LETTER_SQL = `
+  UPDATE outbox_events
+  SET status = 'PENDING', retry_count = 0, leased_until = NULL, available_at = NULL, error_message = NULL
+  WHERE id = ? AND status = 'DEAD_LETTER'
+`;
 
 export class OutboxDatabase {
   private db: DatabaseSync;
@@ -276,13 +282,28 @@ export class OutboxDatabase {
   }
 
   public retryDeadLetterEvent(eventId: string): boolean {
-    const stmt = this.db.prepare(`
-      UPDATE outbox_events
-      SET status = 'PENDING', retry_count = 0, leased_until = NULL, available_at = NULL, error_message = NULL
-      WHERE id = ? AND status = 'DEAD_LETTER'
-    `);
-    const res = stmt.run(eventId);
-    return res.changes > 0;
+    return this.db.prepare(RETRY_DEAD_LETTER_SQL).run(eventId).changes > 0;
+  }
+
+  /**
+   * Resets every listed dead-lettered event to PENDING in one transaction. Ids that are
+   * missing or not dead-lettered are reported as skipped and left untouched.
+   */
+  public retryDeadLetterEvents(eventIds: string[]): RetryBatchResult {
+    const stmt = this.db.prepare(RETRY_DEAD_LETTER_SQL);
+    const retried: string[] = [];
+    const skipped: string[] = [];
+    this.db.exec('BEGIN IMMEDIATE;');
+    try {
+      for (const id of eventIds) {
+        (stmt.run(id).changes > 0 ? retried : skipped).push(id);
+      }
+      this.db.exec('COMMIT;');
+    } catch (err) {
+      this.db.exec('ROLLBACK;');
+      throw err;
+    }
+    return { retried, skipped };
   }
 
   /**

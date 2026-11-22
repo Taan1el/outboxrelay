@@ -10,6 +10,7 @@ import type {
   OutboxEvent,
   OutboxStats,
   PollCycleResult,
+  RetryBatchResult,
 } from '../../../shared/types.js';
 import { InMemoryOutbox } from '../../../shared/in-memory-outbox.js';
 import { buildDemoSeed, DEMO_FIRST_ORDER_NUMBER } from '../../../shared/demo-seed.js';
@@ -20,6 +21,7 @@ import {
   buildOrderWithEvent,
   validateFaultConfig,
   validateOrderPayload,
+  validateRetryBatch,
 } from '../../../shared/outbox-logic.js';
 import { runRelayCycle } from '../../../shared/relay.js';
 
@@ -97,6 +99,10 @@ export async function retryDeadLetter(eventId: string): Promise<void> {
   if (!engine.store.retryDeadLetterEvent(eventId)) {
     throw new Error(`Event '${eventId}' not found in DEAD_LETTER status`);
   }
+}
+
+export async function retryDeadLetters(ids: string[]): Promise<RetryBatchResult> {
+  return engine.store.retryDeadLetterEvents(validateRetryBatch({ ids }));
 }
 
 export async function fetchConsumerInbox(): Promise<ConsumerInboxItem[]> {

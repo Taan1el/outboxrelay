@@ -5,6 +5,7 @@ import {
   ValidationError,
   validateFaultConfig,
   validateOrderPayload,
+  validateRetryBatch,
 } from '../../../shared/outbox-logic.js';
 
 const STATUS_FILTERS = ['ALL', 'PENDING', 'LEASED', 'PUBLISHED', 'DEAD_LETTER'];
@@ -83,6 +84,15 @@ export class OutboxController {
         return;
       }
       res.json({ success: true, message: `Event ${eventId} reset to PENDING for retry` });
+    } catch (err) {
+      fail(res, err);
+    }
+  };
+
+  public retryDeadLetters = async (req: Request, res: Response) => {
+    try {
+      const ids = validateRetryBatch(req.body);
+      res.json({ success: true, data: this.outboxService.retryDeadLetterEvents(ids) });
     } catch (err) {
       fail(res, err);
     }

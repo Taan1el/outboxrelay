@@ -101,6 +101,47 @@ describe('REST API validation and responses', () => {
     expect((await request(app).post('/api/outbox/events/missing/retry')).status).toBe(404);
   });
 
+  it('replays a batch of dead letters in one request and lists the skipped ids', async () => {
+    const ids: string[] = [];
+    for (let n = 0; n < 2; n++) {
+      const created = await request(app).post('/api/orders').send(goodOrder);
+      ids.push(created.body.data.event.id);
+    }
+    for (const id of ids) for (let i = 0; i < 3; i++) db.markEventFailed(id, 'Broker refused connection');
+    expect(db.getOutboxEvents('DEAD_LETTER').map((e) => e.id).sort()).toEqual([...ids].sort());
+
+    const res = await request(app)
+      .post('/api/outbox/dead-letters/retry')
+      .send({ ids: [...ids, ids[0], 'evt_outbox_101', 'missing'] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, data: { retried: ids, skipped: ['evt_outbox_101', 'missing'] } });
+    expect(db.getStats().deadLetterEvents).toBe(0);
+    const pending = (await request(app).get('/api/outbox/events?status=PENDING')).body.data as Array<{ id: string; retryCount: number; errorMessage: string | null }>;
+    expect(pending.filter((e) => ids.includes(e.id)).every((e) => e.retryCount === 0 && e.errorMessage === null)).toBe(true);
+
+    const again = await request(app).post('/api/outbox/dead-letters/retry').send({ ids });
+    expect(again.body.data).toEqual({ retried: [], skipped: ids });
+  });
+
+  it.each([
+    [undefined, /non-empty array/],
+    [[], /JSON object/],
+    [{}, /non-empty array/],
+    [{ ids: [] }, /non-empty array/],
+    [{ ids: 'evt_1' }, /non-empty array/],
+    [{ ids: ['evt_1', 7] }, /ids\[1\]/],
+    [{ ids: ['  '] }, /ids\[0\]/],
+    [{ ids: ['x'.repeat(101)] }, /at most 100 characters/],
+    [{ ids: Array.from({ length: 501 }, (_, i) => `evt_${i}`) }, /at most 500 event ids/],
+  ])('rejects batch replay body %j without changing anything', async (body, message) => {
+    const before = db.getStats();
+    const req = request(app).post('/api/outbox/dead-letters/retry');
+    const res = body === undefined ? await req : await req.send(body as object);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(message);
+    expect(db.getStats()).toEqual(before);
+  });
+
   it('relays a pending event to every consumer and reports per-consumer counts', async () => {
     const poll = await request(app).post('/api/outbox/poll').send({});
     expect(poll.body.data).toMatchObject({ leasedCount: 1, dispatchedCount: 1, failedCount: 0 });

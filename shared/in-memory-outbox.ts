@@ -4,6 +4,7 @@ import type {
   Order,
   OutboxEvent,
   OutboxStats,
+  RetryBatchResult,
 } from './types.js';
 import { CONSUMER_IDS, MAX_ATTEMPTS, deliverySuccessRate, isLeasable, planFailure } from './outbox-logic.js';
 import type { RelayStore } from './relay.js';
@@ -96,6 +97,15 @@ export class InMemoryOutbox implements RelayStore {
     event.availableAt = null;
     event.errorMessage = null;
     return true;
+  }
+
+  retryDeadLetterEvents(eventIds: string[]): RetryBatchResult {
+    const retried: string[] = [];
+    const skipped: string[] = [];
+    for (const id of eventIds) {
+      (this.retryDeadLetterEvent(id) ? retried : skipped).push(id);
+    }
+    return { retried, skipped };
   }
 
   recordConsumerInbox(eventId: string, consumerId: string, eventType: string): { duplicate: boolean } {
