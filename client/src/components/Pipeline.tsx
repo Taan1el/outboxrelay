@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, Play, RotateCcw } from 'lucide-react';
 import type { OutboxEvent, OutboxEventStatus } from '../../../shared/types.js';
-import { MAX_ATTEMPTS } from '../../../shared/outbox-logic.js';
 import { retryDeadLetter } from '../services/index.js';
 import { formatClock } from '../utils/format.js';
 import { formatCount } from '../utils/pluralize.js';
@@ -10,7 +9,7 @@ const LANES: Array<{ status: OutboxEventStatus; title: string; hint: string; ton
   { status: 'PENDING', title: 'Pending', hint: 'waiting for a lease or a retry', tone: 'idle' },
   { status: 'LEASED', title: 'Leased', hint: 'claimed by the relay', tone: 'warn' },
   { status: 'PUBLISHED', title: 'Published', hint: 'delivered to consumers', tone: 'ok' },
-  { status: 'DEAD_LETTER', title: 'Dead letter', hint: `failed ${MAX_ATTEMPTS} times, replay to try again`, tone: 'bad' },
+  { status: 'DEAD_LETTER', title: 'Dead letter', hint: 'reached the attempt limit, replay to try again', tone: 'bad' },
 ];
 
 const VISIBLE_ROWS = 4;
@@ -18,11 +17,13 @@ const VISIBLE_ROWS = 4;
 interface PipelineProps {
   events: OutboxEvent[];
   isPolling: boolean;
+  /** Attempt limit of the current retry policy. */
+  maxAttempts: number;
   onPollNow: () => void;
   onReplayed: () => void;
 }
 
-export const Pipeline: React.FC<PipelineProps> = ({ events, isPolling, onPollNow, onReplayed }) => {
+export const Pipeline: React.FC<PipelineProps> = ({ events, isPolling, maxAttempts, onPollNow, onReplayed }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState<Record<string, boolean>>({});
   const [replayingId, setReplayingId] = useState<string | null>(null);
@@ -100,7 +101,7 @@ export const Pipeline: React.FC<PipelineProps> = ({ events, isPolling, onPollNow
                           </button>
                         </div>
                         <p className="row-meta mono">{evt.eventType}</p>
-                        <p className="row-meta mono">{`${evt.retryCount} of ${MAX_ATTEMPTS} attempts, created ${formatClock(evt.createdAt)}`}</p>
+                        <p className="row-meta mono">{`${evt.retryCount} of ${maxAttempts} attempts, created ${formatClock(evt.createdAt)}`}</p>
                         {retryAt && <p className="row-meta mono">{`retry at ${formatClock(retryAt)}`}</p>}
                         {evt.status === 'DEAD_LETTER' && (
                           <>

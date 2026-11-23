@@ -23,7 +23,7 @@ describe('Pipeline lanes', () => {
   it('lists the newest rows first and expands the rest on demand', async () => {
     const user = userEvent.setup();
     const events = [1, 2, 3, 4, 5, 6].map(published);
-    render(<Pipeline events={events} isPolling={false} onPollNow={() => {}} onReplayed={() => {}} />);
+    render(<Pipeline events={events} isPolling={false} maxAttempts={3} onPollNow={() => {}} onReplayed={() => {}} />);
     const lane = screen.getByRole('heading', { name: 'Published' }).closest('section')!;
     expect(within(lane).getByText('6 rows')).toBeInTheDocument();
     expect(within(lane).getAllByRole('listitem')).toHaveLength(4);
@@ -35,7 +35,14 @@ describe('Pipeline lanes', () => {
   });
 
   it('disables the relay button while a cycle runs', () => {
-    render(<Pipeline events={[]} isPolling onPollNow={() => {}} onReplayed={() => {}} />);
+    render(<Pipeline events={[]} isPolling maxAttempts={3} onPollNow={() => {}} onReplayed={() => {}} />);
     expect(screen.getByRole('button', { name: 'Running cycle' })).toBeDisabled();
+  });
+
+  it('counts attempts against the current attempt limit', () => {
+    const waiting = { ...published(1), status: 'PENDING' as const, retryCount: 2, availableAt: Date.UTC(2026, 2, 1, 10, 1) };
+    render(<Pipeline events={[waiting]} isPolling={false} maxAttempts={5} onPollNow={() => {}} onReplayed={() => {}} />);
+    expect(screen.getByText(/^2 of 5 attempts/)).toBeInTheDocument();
+    expect(screen.getByText('reached the attempt limit, replay to try again')).toBeInTheDocument();
   });
 });

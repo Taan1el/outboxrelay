@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import type { BrokerFaultConfig, OutboxEvent, PollCycleResult } from '../../../shared/types.js';
-import { BACKOFF_BASE_MS, MAX_ATTEMPTS, backoffDelayMs } from '../../../shared/outbox-logic.js';
-import { updateBrokerFault } from '../services/index.js';
+import type { BrokerFaultConfig, OutboxEvent, PollCycleResult, RetryPolicy } from '../../../shared/types.js';
+import { RETRY_POLICY_LIMITS, retrySchedule } from '../../../shared/outbox-logic.js';
+import { updateBrokerFault, updateRetryPolicy } from '../services/index.js';
 import { formatClock } from '../utils/format.js';
 
 type Mode = BrokerFaultConfig['mode'];
@@ -10,8 +10,36 @@ interface FaultSimulatorProps {
   currentMode: Mode;
   lastCycle: PollCycleResult | null;
   retrying: OutboxEvent[];
+  retryPolicy: RetryPolicy;
   onConfigChanged: () => void;
 }
+
+const POLICY_FIELDS: Array<{ key: keyof RetryPolicy; id: string; label: string }> = [
+  { key: 'maxAttempts', id: 'policy-attempts', label: 'Attempt limit' },
+  { key: 'backoffBaseMs', id: 'policy-base', label: 'First retry delay (ms)' },
+  { key: 'backoffMaxMs', id: 'policy-max', label: 'Longest delay (ms)' },
+];
+
+function formatSeconds(ms: number): string {
+  return `${Number((ms / 1000).toFixed(1))} s`;
+}
+
+/** One sentence describing what happens after each failure under the policy. */
+export function describeRetryPolicy(policy: RetryPolicy): string {
+  if (policy.maxAttempts === 1) {
+    return 'A failed delivery is not retried: the first failure moves the event to the dead-letter queue.';
+  }
+  const schedule = retrySchedule(policy).map(formatSeconds).join(', ');
+  return `A failed delivery is retried after ${schedule} (starting at ${formatSeconds(policy.backoffBaseMs)}, doubling each time, at most ${formatSeconds(policy.backoffMaxMs)}). Failure number ${policy.maxAttempts} moves the event to the dead-letter queue.`;
+}
+
+type PolicyDraft = Record<keyof RetryPolicy, string>;
+
+const toDraft = (policy: RetryPolicy): PolicyDraft => ({
+  maxAttempts: String(policy.maxAttempts),
+  backoffBaseMs: String(policy.backoffBaseMs),
+  backoffMaxMs: String(policy.backoffMaxMs),
+});
 
 const MODES: Array<{ value: Mode; label: string; detail: string }> = [
   { value: 'HEALTHY', label: 'Healthy', detail: 'Every delivery succeeds.' },
@@ -19,15 +47,45 @@ const MODES: Array<{ value: Mode; label: string; detail: string }> = [
   { value: 'FULL_OUTAGE', label: 'Full outage', detail: 'Every delivery is refused.' },
 ];
 
-export const FaultSimulator: React.FC<FaultSimulatorProps> = ({ currentMode, lastCycle, retrying, onConfigChanged }) => {
+export const FaultSimulator: React.FC<FaultSimulatorProps> = ({ currentMode, lastCycle, retrying, retryPolicy, onConfigChanged }) => {
   const [selectedMode, setSelectedMode] = useState<Mode>(currentMode);
   const [latencyMs, setLatencyMs] = useState(30);
   const [isUpdating, setIsUpdating] = useState(false);
   const [message, setMessage] = useState<{ text: string; failed: boolean } | null>(null);
 
+  const [policyDraft, setPolicyDraft] = useState<PolicyDraft>(() => toDraft(retryPolicy));
+  const [isSavingPolicy, setIsSavingPolicy] = useState(false);
+  const [policyMessage, setPolicyMessage] = useState<{ text: string; failed: boolean } | null>(null);
+  const { maxAttempts, backoffBaseMs, backoffMaxMs } = retryPolicy;
+
   useEffect(() => {
     setSelectedMode(currentMode);
   }, [currentMode]);
+
+  // Follow the saved policy when it changes (after an apply, a demo reset or another client).
+  useEffect(() => {
+    setPolicyDraft(toDraft({ maxAttempts, backoffBaseMs, backoffMaxMs }));
+  }, [maxAttempts, backoffBaseMs, backoffMaxMs]);
+
+  const handlePolicyApply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingPolicy(true);
+    setPolicyMessage(null);
+    try {
+      const saved = await updateRetryPolicy({
+        maxAttempts: Number(policyDraft.maxAttempts),
+        backoffBaseMs: Number(policyDraft.backoffBaseMs),
+        backoffMaxMs: Number(policyDraft.backoffMaxMs),
+      });
+      const attempts = saved.maxAttempts === 1 ? '1 attempt' : `${saved.maxAttempts} attempts`;
+      setPolicyMessage({ text: `Retry policy saved: ${attempts} before dead letter. It applies from each event's next failure.`, failed: false });
+      onConfigChanged();
+    } catch (err) {
+      setPolicyMessage({ text: err instanceof Error ? err.message : 'The retry policy could not be changed', failed: true });
+    } finally {
+      setIsSavingPolicy(false);
+    }
+  };
 
   const handleApply = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,8 +101,6 @@ export const FaultSimulator: React.FC<FaultSimulatorProps> = ({ currentMode, las
       setIsUpdating(false);
     }
   };
-
-  const schedule = Array.from({ length: MAX_ATTEMPTS - 1 }, (_, i) => `${backoffDelayMs(i + 1) / 1000} s`).join(', ');
 
   return (
     <section aria-labelledby="faults-heading">
@@ -98,6 +154,39 @@ export const FaultSimulator: React.FC<FaultSimulatorProps> = ({ currentMode, las
           <output className="form-result">{message && <span className={message.failed ? 'text-bad' : undefined}>{message.text}</span>}</output>
         </form>
 
+        <form onSubmit={handlePolicyApply} className="fault-form" aria-labelledby="retry-policy-heading">
+          <h3 id="retry-policy-heading" className="panel-heading">
+            Retry policy
+          </h3>
+          <div className="policy-fields">
+            {POLICY_FIELDS.map((field) => (
+              <div key={field.key} className="field">
+                <label className="field-label" htmlFor={field.id}>
+                  {field.label}
+                </label>
+                <input
+                  id={field.id}
+                  type="number"
+                  inputMode="numeric"
+                  required
+                  min={RETRY_POLICY_LIMITS[field.key].min}
+                  max={RETRY_POLICY_LIMITS[field.key].max}
+                  step={1}
+                  value={policyDraft[field.key]}
+                  onChange={(e) => setPolicyDraft((draft) => ({ ...draft, [field.key]: e.target.value }))}
+                  disabled={isSavingPolicy}
+                />
+              </div>
+            ))}
+          </div>
+          <button type="submit" className="btn btn-secondary" disabled={isSavingPolicy}>
+            {isSavingPolicy ? 'Saving' : 'Apply retry policy'}
+          </button>
+          <output className="form-result">
+            {policyMessage && <span className={policyMessage.failed ? 'text-bad' : undefined}>{policyMessage.text}</span>}
+          </output>
+        </form>
+
         <div className="fault-results">
           <h3 className="panel-heading">Last relay cycle</h3>
           {lastCycle ? (
@@ -129,7 +218,7 @@ export const FaultSimulator: React.FC<FaultSimulatorProps> = ({ currentMode, las
 
           <h3 className="panel-heading">Waiting for retry</h3>
           <p className="section-description">
-            {`A failed delivery is retried after ${schedule} (starting at ${BACKOFF_BASE_MS / 1000} s, doubling each time). Failure number ${MAX_ATTEMPTS} moves the event to the dead-letter queue.`}
+            {describeRetryPolicy(retryPolicy)}
           </p>
           {retrying.length === 0 ? (
             <p className="empty-note">No events are waiting for a retry.</p>
@@ -138,7 +227,7 @@ export const FaultSimulator: React.FC<FaultSimulatorProps> = ({ currentMode, las
               {retrying.map((evt) => (
                 <li key={evt.id} className="dense-item">
                   <span className="mono item-title">{evt.id}</span>
-                  <span className="item-meta mono">{`${evt.retryCount} of ${MAX_ATTEMPTS} attempts`}</span>
+                  <span className="item-meta mono">{`${evt.retryCount} of ${maxAttempts} attempts`}</span>
                   <span className="item-meta mono">{evt.availableAt ? `retry at ${formatClock(evt.availableAt)}` : 'due now'}</span>
                 </li>
               ))}

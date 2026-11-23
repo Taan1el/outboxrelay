@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { OutboxStats, Order, OutboxEvent, PollCycleResult } from '../../shared/types.js';
+import { DEFAULT_RETRY_POLICY } from '../../shared/outbox-logic.js';
 import { fetchStats, fetchOrders, fetchOutboxEvents, triggerPoll } from './services/index.js';
 import { DemoBanner } from './components/DemoBanner.js';
 import { Header } from './components/Header.js';
@@ -57,6 +58,7 @@ export const App: React.FC = () => {
   };
 
   const retrying = events.filter((e) => e.status === 'PENDING' && e.retryCount > 0);
+  const retryPolicy = stats?.retryPolicy ?? DEFAULT_RETRY_POLICY;
 
   return (
     <div className="app-container">
@@ -75,7 +77,13 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        <Pipeline events={events} isPolling={isPolling} onPollNow={handleManualPoll} onReplayed={() => void loadData()} />
+        <Pipeline
+          events={events}
+          isPolling={isPolling}
+          maxAttempts={retryPolicy.maxAttempts}
+          onPollNow={handleManualPoll}
+          onReplayed={() => void loadData()}
+        />
 
         <div className="below">
           <div className="below-col">
@@ -86,6 +94,7 @@ export const App: React.FC = () => {
             currentMode={stats?.brokerMode ?? 'HEALTHY'}
             lastCycle={lastCycle}
             retrying={retrying}
+            retryPolicy={retryPolicy}
             onConfigChanged={() => void loadData()}
           />
         </div>

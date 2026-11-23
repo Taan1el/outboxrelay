@@ -611,6 +611,17 @@ textarea {
   width: 100%;
 }
 
+.policy-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem 1rem;
+  width: 100%;
+}
+
+.policy-fields .field {
+  justify-content: flex-end;
+}
+
 .result-list {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

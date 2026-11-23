@@ -16,7 +16,7 @@ The demo runs entirely in your browser. The same relay, backoff and validation c
 
 ![Four pipeline lanes: pending, leased, published and dead letter](docs/screenshots/01-dashboard.png)
 
-More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/02-consumers-and-dead-letters.png), [the fault simulator after a full outage](docs/screenshots/03-fault-simulator.png), [the console at phone width](docs/screenshots/04-mobile.png), [the dead-letter inspector with one error group selected and the replay confirmation open](docs/screenshots/05-dead-letter-inspector.png).
+More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/02-consumers-and-dead-letters.png), [the fault simulator with a four-attempt retry policy after a full outage](docs/screenshots/03-fault-simulator.png), [the console at phone width](docs/screenshots/04-mobile.png), [the dead-letter inspector with one error group selected and the replay confirmation open](docs/screenshots/05-dead-letter-inspector.png).
 
 ## Features
 
@@ -27,7 +27,7 @@ More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/0
 - **Dead-letter queue.** Dead-lettered events keep their last error and can be replayed, which resets their attempts.
 - **Consumer inbox.** Each consumer records `(event id, consumer)` once. SQLite records or counts a repeated delivery in one atomic statement, including when relay workers use separate connections. A repeated delivery is counted and ignored.
   Receipt IDs are opaque: SQLite uses UUIDs, while the browser store allocates sequential IDs without reusing seeded receipt IDs. Existing receipt IDs remain unchanged.
-- **Fault simulator.** Switch the broker between healthy, partial failures (half of the deliveries fail) and full outage, and set the delivery latency.
+- **Fault simulator.** Switch the broker between healthy, partial failures (half of the deliveries fail) and full outage, and set the delivery latency. A retry policy form next to it changes the attempt limit, the first retry delay and the longest delay; the retry schedule text and the attempt counts on every row follow the saved policy.
 - **Dead-letter inspector.** Load the dead-letter lane or a JSON or CSV export, see the events grouped by their last error, pick groups and replay them in one step after a confirmation, or export their ids. See [Inspecting dead letters](#inspecting-dead-letters).
 - **Browser demo** for GitHub Pages with a demo bar and a reset control.
 
@@ -168,7 +168,7 @@ npm test
 ```
 
 - **Server** (Vitest and Supertest): routes and validation, transaction rollback, leasing and lease expiry, backoff timing, the retry policy (validation, custom schedules and attempt limits applied by later relay cycles), dead-lettering and replay (single and batch, with request validation), the consumer inbox, a migration from a database without `available_at`, the background poller, path resolution, and parity between the SQLite and in-memory stores.
-- **Client** (Vitest and React Testing Library): the tally, the four lanes with their row counts, the show-all toggle, the dead-letter replay, the order form, the fault simulator, error handling, the refresh timer, the browser demo API, the demo bar, and the dead-letter inspector (CSV and JSON parsing with its error messages, error grouping, replay list export, the delayed release of the download URL, and batch replay with its confirmation, skipped ids and failure message).
+- **Client** (Vitest and React Testing Library): the tally, the four lanes with their row counts, the show-all toggle, the dead-letter replay, the order form, the fault simulator and its retry policy form (saved policy, new schedule, rejected policy), error handling, the refresh timer, the browser demo API, the demo bar, and the dead-letter inspector (CSV and JSON parsing with its error messages, error grouping, replay list export, the delayed release of the download URL, and batch replay with its confirmation, skipped ids and failure message).
 - **Accessibility** (axe-core through vitest-axe): the suite includes automated accessibility checks for the lanes, the orders and consumers panels, the fault simulator, an opened row detail and the dead-letter inspector with groups loaded, using the WCAG 2 A and AA rules. jsdom cannot compute colors, so color contrast is checked outside jsdom.
 
 Tests that depend on time use fake timers; none of them sleep.

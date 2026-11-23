@@ -60,6 +60,7 @@ type Call = { url: string; method: string; body: unknown };
 let calls: Call[];
 let failStats = false;
 let failPoll = false;
+let policyError: string | null = null;
 
 function installFetch() {
   calls = [];
@@ -68,10 +69,16 @@ function installFetch() {
     calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     const ok = (data: unknown) => ({ ok: true, json: async () => ({ success: true, data }) });
     if (url.endsWith('/stats')) {
-      return failStats ? { ok: false, statusText: 'Server Error', json: async () => ({ error: 'database is locked' }) } : ok(mockStats);
+      return failStats ? { ok: false, statusText: 'Server Error', json: async () => ({ error: 'database is locked' }) } : ok({ ...mockStats });
     }
     if (url.endsWith('/outbox/poll')) {
       return failPoll ? { ok: false, statusText: 'Bad Request', json: async () => ({ error: 'batchSize must be an integer' }) } : ok(cycle);
+    }
+    if (url.endsWith('/outbox/retry-policy') && method === 'POST') {
+      if (policyError) return { ok: false, statusText: 'Bad Request', json: async () => ({ success: false, error: policyError }) };
+      const body = JSON.parse(String(init!.body));
+      mockStats.retryPolicy = { ...mockStats.retryPolicy, ...body };
+      return ok(mockStats.retryPolicy);
     }
     if (url.includes('/outbox/events?status=DEAD_LETTER')) return ok(mockEvents.filter((e) => e.status === 'DEAD_LETTER'));
     if (url.includes('/retry')) return { ok: true, json: async () => ({ success: true }) };
@@ -90,6 +97,8 @@ describe('OutboxRelay operations console', () => {
   beforeEach(() => {
     failStats = false;
     failPoll = false;
+    policyError = null;
+    mockStats.retryPolicy = { maxAttempts: 3, backoffBaseMs: 2000, backoffMaxMs: 60000 };
     installFetch();
   });
 
@@ -200,6 +209,41 @@ describe('OutboxRelay operations console', () => {
     await waitFor(() => expect(calledWith('POST', '/broker/fault-config')).toHaveLength(1));
     expect(calledWith('POST', '/broker/fault-config')[0].body).toEqual({ mode: 'FULL_OUTAGE', simulatedLatencyMs: 30 });
     expect(await screen.findByText('Broker set to full outage.')).toBeInTheDocument();
+  });
+
+  it('changes the retry policy and shows the new schedule', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText('98.3%');
+    expect(screen.getByLabelText('Attempt limit')).toHaveValue(3);
+    expect(screen.getAllByText(/^1 of 3 attempts/).length).toBeGreaterThan(0);
+
+    const attempts = screen.getByLabelText('Attempt limit');
+    await user.clear(attempts);
+    await user.type(attempts, '4');
+    const base = screen.getByLabelText('First retry delay (ms)');
+    await user.clear(base);
+    await user.type(base, '500');
+    await user.click(screen.getByRole('button', { name: 'Apply retry policy' }));
+
+    await waitFor(() => expect(calledWith('POST', '/outbox/retry-policy')).toHaveLength(1));
+    expect(calledWith('POST', '/outbox/retry-policy')[0].body).toEqual({ maxAttempts: 4, backoffBaseMs: 500, backoffMaxMs: 60000 });
+    expect(await screen.findByText(/Retry policy saved: 4 attempts before dead letter/)).toBeInTheDocument();
+    expect(await screen.findByText(/retried after 0\.5 s, 1 s, 2 s \(starting at 0\.5 s/)).toBeInTheDocument();
+    expect(screen.getAllByText(/^1 of 4 attempts/).length).toBeGreaterThan(0);
+  });
+
+  it('reports a rejected retry policy and keeps the saved one', async () => {
+    policyError = 'backoffMaxMs (1000) must be at least backoffBaseMs (2000)';
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText('98.3%');
+    const max = screen.getByLabelText('Longest delay (ms)');
+    await user.clear(max);
+    await user.type(max, '1000');
+    await user.click(screen.getByRole('button', { name: 'Apply retry policy' }));
+    expect(await screen.findByText(policyError)).toHaveClass('text-bad');
+    expect(screen.getByText(/retried after 2 s, 4 s/)).toBeInTheDocument();
   });
 
   it('lists events waiting for a retry in the fault simulator', async () => {
