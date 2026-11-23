@@ -5,8 +5,9 @@ import type {
   OutboxEvent,
   OutboxStats,
   RetryBatchResult,
+  RetryPolicy,
 } from './types.js';
-import { CONSUMER_IDS, MAX_ATTEMPTS, deliverySuccessRate, isLeasable, planFailure } from './outbox-logic.js';
+import { CONSUMER_IDS, DEFAULT_RETRY_POLICY, deliverySuccessRate, isLeasable, planFailure } from './outbox-logic.js';
 import type { RelayStore } from './relay.js';
 
 export interface InMemorySeed {
@@ -72,12 +73,12 @@ export class InMemoryOutbox implements RelayStore {
     event.errorMessage = null;
   }
 
-  markEventFailed(eventId: string, errorMessage: string, maxRetries: number = MAX_ATTEMPTS, leasedUntil?: number): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
+  markEventFailed(eventId: string, errorMessage: string, policy: RetryPolicy = DEFAULT_RETRY_POLICY, leasedUntil?: number): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
     const event = this.events.find((e) => e.id === eventId);
     if (leasedUntil !== undefined && !this.ownsLease(eventId, leasedUntil)) {
       return { status: 'PENDING', retries: event?.retryCount ?? 0 };
     }
-    const plan = planFailure(event ? event.retryCount : 0, this.clock(), maxRetries);
+    const plan = planFailure(event ? event.retryCount : 0, this.clock(), policy);
     if (event) {
       event.status = plan.status;
       event.retryCount = plan.retryCount;
@@ -151,7 +152,7 @@ export class InMemoryOutbox implements RelayStore {
       .map(({ duplicateCount: _count, ...item }) => ({ ...item }));
   }
 
-  getStats(): Omit<OutboxStats, 'brokerMode'> {
+  getStats(): Omit<OutboxStats, 'brokerMode' | 'retryPolicy'> {
     const count = (status: string) => this.events.filter((e) => e.status === status).length;
     const published = count('PUBLISHED');
     const deadLetter = count('DEAD_LETTER');

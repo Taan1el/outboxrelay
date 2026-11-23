@@ -115,6 +115,22 @@ describe('browser demo API', () => {
     expect(await demo.triggerPoll()).toMatchObject({ leasedCount: 2, failedCount: rate === 100 ? 2 : 0, dispatchedCount: rate === 100 ? 0 : 2 });
   });
 
+  it('applies a retry policy to demo deliveries and resets it with the sample data', async () => {
+    expect((await demo.fetchStats()).retryPolicy).toEqual({ maxAttempts: 3, backoffBaseMs: 2000, backoffMaxMs: 60000 });
+    expect(await demo.updateRetryPolicy({ maxAttempts: 1 })).toEqual({ maxAttempts: 1, backoffBaseMs: 2000, backoffMaxMs: 60000 });
+    await demo.updateBrokerFault({ mode: 'FULL_OUTAGE', simulatedLatencyMs: 0 });
+    const poll = demo.triggerPoll();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await poll).toMatchObject({ leasedCount: 2, failedCount: 2, deadLetterCount: 2 });
+
+    await expect(demo.updateRetryPolicy({ backoffMaxMs: 50 })).rejects.toThrow(/backoffMaxMs/);
+    await expect(demo.updateRetryPolicy({ backoffMaxMs: 1000 })).rejects.toThrow(/at least backoffBaseMs/);
+    expect((await demo.fetchStats()).retryPolicy.maxAttempts).toBe(1);
+
+    demo.resetDemoData();
+    expect((await demo.fetchStats()).retryPolicy.maxAttempts).toBe(3);
+  });
+
   it('repeats the same partial-failure outcomes after a reset', async () => {
     const outcome = async () => {
       demo.resetDemoData();

@@ -1,12 +1,12 @@
-import type { BrokerFaultConfig, OutboxEvent, PollCycleResult } from './types.js';
-import { CONSUMER_IDS, failureMessage, shouldSimulateFailure, validatePollOptions } from './outbox-logic.js';
+import type { BrokerFaultConfig, OutboxEvent, PollCycleResult, RetryPolicy } from './types.js';
+import { CONSUMER_IDS, DEFAULT_RETRY_POLICY, failureMessage, shouldSimulateFailure, validatePollOptions } from './outbox-logic.js';
 
 /** The storage operations one relay cycle needs; the SQLite database and the in-browser store both provide them. */
 export interface RelayStore {
   leasePendingEvents(leaseSeconds: number, limit: number): OutboxEvent[];
   ownsLease(eventId: string, leasedUntil: number): boolean;
   markEventPublished(eventId: string, leasedUntil?: number): void;
-  markEventFailed(eventId: string, errorMessage: string, maxRetries?: number, leasedUntil?: number): { status: 'PENDING' | 'DEAD_LETTER'; retries: number };
+  markEventFailed(eventId: string, errorMessage: string, policy?: RetryPolicy, leasedUntil?: number): { status: 'PENDING' | 'DEAD_LETTER'; retries: number };
   recordConsumerInbox(eventId: string, consumerId: string, eventType: string): { duplicate: boolean };
 }
 
@@ -18,7 +18,8 @@ export interface RelayEnvironment {
 
 /**
  * One poll cycle: lease due events, try to hand each to the simulated broker, then either
- * mark it published and record it in every consumer inbox, or schedule a retry or dead-letter it.
+ * mark it published and record it in every consumer inbox, or schedule a retry or dead-letter it
+ * according to the retry policy.
  */
 export async function runRelayCycle(
   store: RelayStore,
@@ -26,6 +27,7 @@ export async function runRelayCycle(
   options: { batchSize?: unknown; leaseSeconds?: unknown },
   env: RelayEnvironment,
   defaults: { batchSize: number; leaseSeconds: number },
+  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<PollCycleResult> {
   const { batchSize, leaseSeconds } = validatePollOptions(
     options.batchSize === undefined ? defaults.batchSize : options.batchSize,
@@ -44,7 +46,7 @@ export async function runRelayCycle(
 
     if (shouldSimulateFailure(faults, env.random)) {
       failedCount++;
-      const { status } = store.markEventFailed(event.id, failureMessage(faults.mode), undefined, event.leasedUntil);
+      const { status } = store.markEventFailed(event.id, failureMessage(faults.mode), retryPolicy, event.leasedUntil);
       if (status === 'DEAD_LETTER') deadLetterCount++;
     } else {
       for (const consumerId of CONSUMER_IDS) {

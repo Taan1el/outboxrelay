@@ -14,6 +14,7 @@ export const fetchOutboxEvents = impl.fetchOutboxEvents;
 export const triggerPoll = impl.triggerPoll;
 export const retryDeadLetter = impl.retryDeadLetter;
 export const retryDeadLetters = impl.retryDeadLetters;
+export const updateRetryPolicy = impl.updateRetryPolicy;
 export const fetchConsumerInbox = impl.fetchConsumerInbox;
 export const updateBrokerFault = impl.updateBrokerFault;
 

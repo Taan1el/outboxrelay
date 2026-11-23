@@ -3,13 +3,27 @@ import type {
   CreateOrderPayload,
   Order,
   OutboxEvent,
+  RetryPolicy,
 } from './types.js';
 
-/** Failed attempts after which an event moves to the dead-letter queue. */
+/** Default number of failed attempts after which an event moves to the dead-letter queue. */
 export const MAX_ATTEMPTS = 3;
-/** Delay before the first retry; each further failure doubles it. */
+/** Default delay before the first retry; each further failure doubles it. */
 export const BACKOFF_BASE_MS = 2000;
 export const BACKOFF_MAX_MS = 60_000;
+
+export const DEFAULT_RETRY_POLICY: Readonly<RetryPolicy> = Object.freeze({
+  maxAttempts: MAX_ATTEMPTS,
+  backoffBaseMs: BACKOFF_BASE_MS,
+  backoffMaxMs: BACKOFF_MAX_MS,
+});
+
+/** Bounds a retry policy must stay within. */
+export const RETRY_POLICY_LIMITS = {
+  maxAttempts: { min: 1, max: 10 },
+  backoffBaseMs: { min: 100, max: 60_000 },
+  backoffMaxMs: { min: 100, max: 600_000 },
+} as const;
 
 export const DEFAULT_BATCH_SIZE = 10;
 export const DEFAULT_LEASE_SECONDS = 5;
@@ -38,10 +52,18 @@ export function validatePollOptions(batchSize: unknown, leaseSeconds: unknown): 
   return { batchSize, leaseSeconds };
 }
 
-/** Delay before retry number `attempt` (1 for the first retry): 2s, 4s, 8s, capped at 60s. */
-export function backoffDelayMs(attempt: number): number {
+/**
+ * Delay before retry number `attempt` (1 for the first retry). With the default policy:
+ * 2s, 4s, 8s, capped at 60s.
+ */
+export function backoffDelayMs(attempt: number, policy: RetryPolicy = DEFAULT_RETRY_POLICY): number {
   const exponent = Math.max(0, attempt - 1);
-  return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** exponent);
+  return Math.min(policy.backoffMaxMs, policy.backoffBaseMs * 2 ** exponent);
+}
+
+/** The waits between attempts under a policy: one entry per retry before the event is dead-lettered. */
+export function retrySchedule(policy: RetryPolicy): number[] {
+  return Array.from({ length: policy.maxAttempts - 1 }, (_, i) => backoffDelayMs(i + 1, policy));
 }
 
 export interface FailurePlan {
@@ -51,12 +73,12 @@ export interface FailurePlan {
 }
 
 /** Decides what happens to an event after a failed delivery attempt. */
-export function planFailure(previousRetryCount: number, now: number, maxAttempts: number = MAX_ATTEMPTS): FailurePlan {
+export function planFailure(previousRetryCount: number, now: number, policy: RetryPolicy = DEFAULT_RETRY_POLICY): FailurePlan {
   const retryCount = previousRetryCount + 1;
-  if (retryCount >= maxAttempts) {
+  if (retryCount >= policy.maxAttempts) {
     return { status: 'DEAD_LETTER', retryCount, availableAt: null };
   }
-  return { status: 'PENDING', retryCount, availableAt: now + backoffDelayMs(retryCount) };
+  return { status: 'PENDING', retryCount, availableAt: now + backoffDelayMs(retryCount, policy) };
 }
 
 /** True when a poller may lease the event: pending and due, or leased with an expired lease. */
@@ -121,6 +143,44 @@ export function validateFaultConfig(body: unknown): Partial<BrokerFaultConfig> {
     patch.simulatedLatencyMs = simulatedLatencyMs;
   }
   return patch;
+}
+
+/**
+ * Reads a retry policy patch. Every field is optional, but at least one must be present;
+ * unknown fields are rejected so a typo cannot silently leave the policy unchanged.
+ */
+export function validateRetryPolicy(body: unknown): Partial<RetryPolicy> {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new ValidationError('Retry policy must be a JSON object');
+  }
+  const fields = Object.keys(RETRY_POLICY_LIMITS) as Array<keyof RetryPolicy>;
+  const unknown = Object.keys(body).filter((key) => !(fields as string[]).includes(key));
+  if (unknown.length > 0) {
+    throw new ValidationError(`Unknown retry policy field: ${unknown[0]}`);
+  }
+  const patch: Partial<RetryPolicy> = {};
+  for (const field of fields) {
+    const value = (body as Record<string, unknown>)[field];
+    if (value === undefined) continue;
+    const { min, max } = RETRY_POLICY_LIMITS[field];
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+      throw new ValidationError(`${field} must be an integer between ${min} and ${max}`);
+    }
+    patch[field] = value;
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new ValidationError(`Retry policy needs at least one of ${fields.join(', ')}`);
+  }
+  return patch;
+}
+
+/** Applies a validated patch; the resulting cap may not be lower than the first delay. */
+export function applyRetryPolicy(current: RetryPolicy, patch: Partial<RetryPolicy>): RetryPolicy {
+  const next: RetryPolicy = { ...current, ...patch };
+  if (next.backoffMaxMs < next.backoffBaseMs) {
+    throw new ValidationError(`backoffMaxMs (${next.backoffMaxMs}) must be at least backoffBaseMs (${next.backoffBaseMs})`);
+  }
+  return next;
 }
 
 export function validateOrderPayload(body: unknown): CreateOrderPayload {

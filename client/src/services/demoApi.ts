@@ -11,23 +11,28 @@ import type {
   OutboxStats,
   PollCycleResult,
   RetryBatchResult,
+  RetryPolicy,
 } from '../../../shared/types.js';
 import { InMemoryOutbox } from '../../../shared/in-memory-outbox.js';
 import { buildDemoSeed, DEMO_FIRST_ORDER_NUMBER } from '../../../shared/demo-seed.js';
 import {
   DEFAULT_BATCH_SIZE,
   DEFAULT_LEASE_SECONDS,
+  DEFAULT_RETRY_POLICY,
   applyFaultConfig,
+  applyRetryPolicy,
   buildOrderWithEvent,
   validateFaultConfig,
   validateOrderPayload,
   validateRetryBatch,
+  validateRetryPolicy,
 } from '../../../shared/outbox-logic.js';
 import { runRelayCycle } from '../../../shared/relay.js';
 
 export interface DemoEngine {
   store: InMemoryOutbox;
   faults: BrokerFaultConfig;
+  retryPolicy: RetryPolicy;
   random: () => number;
   nextOrderNumber: number;
 }
@@ -48,6 +53,7 @@ export function createDemoEngine(clock: () => number = Date.now): DemoEngine {
   return {
     store: new InMemoryOutbox(clock, buildDemoSeed(clock())),
     faults: { mode: 'HEALTHY', failureRatePercent: 0, simulatedLatencyMs: 30 },
+    retryPolicy: { ...DEFAULT_RETRY_POLICY },
     random: seededRandom(2026),
     nextOrderNumber: DEMO_FIRST_ORDER_NUMBER,
   };
@@ -61,7 +67,7 @@ export function resetDemoData(): void {
 }
 
 export async function fetchStats(): Promise<OutboxStats> {
-  return { ...engine.store.getStats(), brokerMode: engine.faults.mode };
+  return { ...engine.store.getStats(), brokerMode: engine.faults.mode, retryPolicy: { ...engine.retryPolicy } };
 }
 
 export async function fetchOrders(): Promise<Order[]> {
@@ -92,6 +98,7 @@ export async function triggerPoll(): Promise<PollCycleResult> {
       now: () => performance.now(),
     },
     { batchSize: DEFAULT_BATCH_SIZE, leaseSeconds: DEFAULT_LEASE_SECONDS },
+    current.retryPolicy,
   );
 }
 
@@ -103,6 +110,11 @@ export async function retryDeadLetter(eventId: string): Promise<void> {
 
 export async function retryDeadLetters(ids: string[]): Promise<RetryBatchResult> {
   return engine.store.retryDeadLetterEvents(validateRetryBatch({ ids }));
+}
+
+export async function updateRetryPolicy(patch: Partial<RetryPolicy>): Promise<RetryPolicy> {
+  engine.retryPolicy = applyRetryPolicy(engine.retryPolicy, validateRetryPolicy(patch));
+  return { ...engine.retryPolicy };
 }
 
 export async function fetchConsumerInbox(): Promise<ConsumerInboxItem[]> {

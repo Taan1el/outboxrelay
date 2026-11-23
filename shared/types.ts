@@ -48,6 +48,16 @@ export interface BrokerFaultConfig {
   simulatedLatencyMs: number;
 }
 
+/** How failed deliveries are retried: attempt limit and exponential backoff bounds. */
+export interface RetryPolicy {
+  /** Failed attempts after which an event moves to the dead-letter queue. */
+  maxAttempts: number;
+  /** Delay before the first retry; each further failure doubles it. */
+  backoffBaseMs: number;
+  /** Upper bound for any single retry delay. */
+  backoffMaxMs: number;
+}
+
 export interface ConsumerStats {
   consumerId: string;
   processed: number;
@@ -67,6 +77,7 @@ export interface OutboxStats {
   deliverySuccessRate: number;
   consumers: ConsumerStats[];
   brokerMode: 'HEALTHY' | 'PARTIAL_FAILURES' | 'FULL_OUTAGE';
+  retryPolicy: RetryPolicy;
 }
 
 /** Result of a batch replay: ids reset to PENDING, and ids that were not dead-lettered. */

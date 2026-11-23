@@ -2,15 +2,20 @@ import { describe, expect, it } from 'vitest';
 import {
   BACKOFF_BASE_MS,
   BACKOFF_MAX_MS,
+  DEFAULT_RETRY_POLICY,
+  ValidationError,
   applyFaultConfig,
+  applyRetryPolicy,
   backoffDelayMs,
   buildOrderWithEvent,
   deliverySuccessRate,
   isLeasable,
   planFailure,
+  retrySchedule,
   shouldSimulateFailure,
   validateFaultConfig,
   validateOrderPayload,
+  validateRetryPolicy,
 } from '../../shared/outbox-logic.js';
 import type { BrokerFaultConfig } from '../../shared/types.js';
 
@@ -29,7 +34,53 @@ describe('retry backoff', () => {
     expect(planFailure(0, 1000)).toEqual({ status: 'PENDING', retryCount: 1, availableAt: 1000 + BACKOFF_BASE_MS });
     expect(planFailure(1, 1000)).toEqual({ status: 'PENDING', retryCount: 2, availableAt: 1000 + BACKOFF_BASE_MS * 2 });
     expect(planFailure(2, 1000)).toEqual({ status: 'DEAD_LETTER', retryCount: 3, availableAt: null });
-    expect(planFailure(0, 1000, 1).status).toBe('DEAD_LETTER');
+    expect(planFailure(0, 1000, { ...DEFAULT_RETRY_POLICY, maxAttempts: 1 }).status).toBe('DEAD_LETTER');
+  });
+
+  it('follows a custom policy for delays, cap and attempt limit', () => {
+    const policy = { maxAttempts: 5, backoffBaseMs: 500, backoffMaxMs: 1500 };
+    expect(retrySchedule(policy)).toEqual([500, 1000, 1500, 1500]);
+    expect(planFailure(1, 0, policy)).toEqual({ status: 'PENDING', retryCount: 2, availableAt: 1000 });
+    expect(planFailure(3, 0, policy)).toEqual({ status: 'PENDING', retryCount: 4, availableAt: 1500 });
+    expect(planFailure(4, 0, policy).status).toBe('DEAD_LETTER');
+  });
+
+  it('keeps the default schedule at 2 s and 4 s before the third failure dead-letters', () => {
+    expect(retrySchedule(DEFAULT_RETRY_POLICY)).toEqual([2000, 4000]);
+    expect(retrySchedule({ ...DEFAULT_RETRY_POLICY, maxAttempts: 1 })).toEqual([]);
+  });
+});
+
+describe('retry policy validation', () => {
+  it('accepts a partial patch within bounds', () => {
+    expect(validateRetryPolicy({ maxAttempts: 5 })).toEqual({ maxAttempts: 5 });
+    expect(validateRetryPolicy({ backoffBaseMs: 100, backoffMaxMs: 600000 })).toEqual({ backoffBaseMs: 100, backoffMaxMs: 600000 });
+  });
+
+  it.each([
+    [null, 'must be a JSON object'],
+    [[1], 'must be a JSON object'],
+    [{}, 'needs at least one of'],
+    [{ maxAttempts: 0 }, 'maxAttempts must be an integer between 1 and 10'],
+    [{ maxAttempts: 11 }, 'maxAttempts must be an integer between 1 and 10'],
+    [{ maxAttempts: 2.5 }, 'maxAttempts must be an integer'],
+    [{ maxAttempts: '3' }, 'maxAttempts must be an integer'],
+    [{ backoffBaseMs: 99 }, 'backoffBaseMs must be an integer between 100 and 60000'],
+    [{ backoffMaxMs: 600001 }, 'backoffMaxMs must be an integer between 100 and 600000'],
+    [{ maxAttempt: 3 }, 'Unknown retry policy field: maxAttempt'],
+  ])('rejects %j', (body, message) => {
+    expect(() => validateRetryPolicy(body)).toThrow(ValidationError);
+    expect(() => validateRetryPolicy(body)).toThrow(message);
+  });
+
+  it('refuses a cap below the first delay after merging', () => {
+    expect(() => applyRetryPolicy(DEFAULT_RETRY_POLICY, { backoffMaxMs: 1000 })).toThrow('backoffMaxMs (1000) must be at least backoffBaseMs (2000)');
+    expect(applyRetryPolicy(DEFAULT_RETRY_POLICY, { backoffBaseMs: 1000, backoffMaxMs: 1000 })).toEqual({ maxAttempts: 3, backoffBaseMs: 1000, backoffMaxMs: 1000 });
+  });
+
+  it('does not change the shared default', () => {
+    applyRetryPolicy(DEFAULT_RETRY_POLICY, { maxAttempts: 7 });
+    expect(DEFAULT_RETRY_POLICY.maxAttempts).toBe(3);
   });
 });
 

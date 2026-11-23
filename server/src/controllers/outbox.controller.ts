@@ -6,6 +6,7 @@ import {
   validateFaultConfig,
   validateOrderPayload,
   validateRetryBatch,
+  validateRetryPolicy,
 } from '../../../shared/outbox-logic.js';
 
 const STATUS_FILTERS = ['ALL', 'PENDING', 'LEASED', 'PUBLISHED', 'DEAD_LETTER'];
@@ -101,6 +102,23 @@ export class OutboxController {
   public getConsumerInbox = async (_req: Request, res: Response) => {
     try {
       res.json({ success: true, data: this.outboxService.getConsumerInbox() });
+    } catch (err) {
+      fail(res, err);
+    }
+  };
+
+  public getRetryPolicy = async (_req: Request, res: Response) => {
+    try {
+      res.json({ success: true, data: this.outboxService.getRetryPolicy() });
+    } catch (err) {
+      fail(res, err);
+    }
+  };
+
+  public setRetryPolicy = async (req: Request, res: Response) => {
+    try {
+      const patch = validateRetryPolicy(req.body);
+      res.json({ success: true, data: this.outboxService.setRetryPolicy(patch) });
     } catch (err) {
       fail(res, err);
     }

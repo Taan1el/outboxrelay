@@ -2,8 +2,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
-import type { ConsumerInboxItem, ConsumerStats, Order, OutboxEvent, OutboxStats, RetryBatchResult } from '../../../shared/types.js';
-import { CONSUMER_IDS, MAX_ATTEMPTS, deliverySuccessRate, planFailure } from '../../../shared/outbox-logic.js';
+import type { ConsumerInboxItem, ConsumerStats, Order, OutboxEvent, OutboxStats, RetryBatchResult, RetryPolicy } from '../../../shared/types.js';
+import { CONSUMER_IDS, DEFAULT_RETRY_POLICY, deliverySuccessRate, planFailure } from '../../../shared/outbox-logic.js';
 import { defaultDatabasePath } from '../lib/repoPaths.js';
 
 const RETRY_DEAD_LETTER_SQL = `
@@ -267,12 +267,12 @@ export class OutboxDatabase {
     stmt.run(now, eventId, leasedUntil ?? null, leasedUntil ?? null, Date.now());
   }
 
-  public markEventFailed(eventId: string, errorMessage: string, maxRetries: number = MAX_ATTEMPTS, leasedUntil?: number): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
+  public markEventFailed(eventId: string, errorMessage: string, policy: RetryPolicy = DEFAULT_RETRY_POLICY, leasedUntil?: number): { status: 'PENDING' | 'DEAD_LETTER'; retries: number } {
     const eventRow = this.db.prepare('SELECT retry_count FROM outbox_events WHERE id = ?').get(eventId) as { retry_count: number } | undefined;
     if (leasedUntil !== undefined && !this.ownsLease(eventId, leasedUntil)) {
       return { status: 'PENDING', retries: eventRow?.retry_count ?? 0 };
     }
-    const plan = planFailure(eventRow ? eventRow.retry_count : 0, Date.now(), maxRetries);
+    const plan = planFailure(eventRow ? eventRow.retry_count : 0, Date.now(), policy);
     this.db.prepare(`
       UPDATE outbox_events
       SET status = ?, retry_count = ?, leased_until = NULL, available_at = ?, error_message = ?
@@ -379,7 +379,7 @@ export class OutboxDatabase {
     }));
   }
 
-  public getStats(): Omit<OutboxStats, 'brokerMode'> {
+  public getStats(): Omit<OutboxStats, 'brokerMode' | 'retryPolicy'> {
     const totalOrders = (this.db.prepare('SELECT COUNT(*) as cnt FROM orders').get() as any).cnt;
     const totalEvents = (this.db.prepare('SELECT COUNT(*) as cnt FROM outbox_events').get() as any).cnt;
     const pendingEvents = (this.db.prepare("SELECT COUNT(*) as cnt FROM outbox_events WHERE status = 'PENDING'").get() as any).cnt;

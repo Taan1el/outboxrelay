@@ -32,6 +32,10 @@ export function createApiRouter(service: OutboxService): Router {
   router.post('/outbox/events/:id/retry', controller.retryDeadLetter);
   router.post('/outbox/dead-letters/retry', controller.retryDeadLetters);
 
+  // Retry policy for failed deliveries
+  router.get('/outbox/retry-policy', controller.getRetryPolicy);
+  router.post('/outbox/retry-policy', controller.setRetryPolicy);
+
   // Consumer Inbox Audit
   router.get('/consumer/inbox', controller.getConsumerInbox);
 

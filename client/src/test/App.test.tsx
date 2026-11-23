@@ -22,6 +22,7 @@ const mockStats: OutboxStats = {
     { consumerId: 'consumer-analytics', processed: 0, duplicatesRejected: 0, lastProcessedAt: null },
   ],
   brokerMode: 'HEALTHY',
+  retryPolicy: { maxAttempts: 3, backoffBaseMs: 2000, backoffMaxMs: 60000 },
 };
 
 const mockOrders: Order[] = [

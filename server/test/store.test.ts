@@ -178,4 +178,24 @@ describe('in-memory store parity with SQLite', () => {
     expect(mem.getStats()).toEqual(db.getStats());
     db.close();
   });
+
+  it('applies a custom retry policy the same way', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const db = new OutboxDatabase(':memory:');
+    const mem = new InMemoryOutbox(Date.now, {
+      orders: db.getOrders(),
+      events: db.getOutboxEvents(),
+      inbox: db.getConsumerInbox(),
+    });
+    const policy = { maxAttempts: 4, backoffBaseMs: 300, backoffMaxMs: 500 };
+    const outcomes = [db, mem].map((s) => {
+      addOrder(s, 20, T0 + 1000);
+      return [1, 2, 3, 4].map(() => s.markEventFailed('evt_20', 'down', policy).status);
+    });
+    expect(outcomes[0]).toEqual(['PENDING', 'PENDING', 'PENDING', 'DEAD_LETTER']);
+    expect(outcomes[1]).toEqual(outcomes[0]);
+    expect(mem.getOutboxEvents()).toEqual(db.getOutboxEvents());
+    db.close();
+  });
 });

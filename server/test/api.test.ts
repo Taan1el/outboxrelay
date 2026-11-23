@@ -175,6 +175,47 @@ describe('REST API validation and responses', () => {
     expect((await request(app).get('/api/stats')).body.data.deliverySuccessRate).toBe(50);
   });
 
+  it('reads and updates the retry policy, and reports it in stats', async () => {
+    const initial = await request(app).get('/api/outbox/retry-policy');
+    expect(initial.status).toBe(200);
+    expect(initial.body.data).toEqual({ maxAttempts: 3, backoffBaseMs: 2000, backoffMaxMs: 60000 });
+
+    const updated = await request(app).post('/api/outbox/retry-policy').send({ maxAttempts: 5, backoffBaseMs: 500 });
+    expect(updated.status).toBe(200);
+    expect(updated.body.data).toEqual({ maxAttempts: 5, backoffBaseMs: 500, backoffMaxMs: 60000 });
+    expect((await request(app).get('/api/stats')).body.data.retryPolicy).toEqual(updated.body.data);
+  });
+
+  it.each([
+    [{}],
+    [{ maxAttempts: 0 }],
+    [{ maxAttempts: 4, backoffBaseMs: 50 }],
+    [{ backoffMaxMs: 1000 }],
+    [{ maxAttempts: 4, retries: 2 }],
+    [[3]],
+  ])('rejects retry policy %j and keeps the current policy', async (body) => {
+    const res = await request(app).post('/api/outbox/retry-policy').send(body);
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(service.getRetryPolicy()).toEqual({ maxAttempts: 3, backoffBaseMs: 2000, backoffMaxMs: 60000 });
+  });
+
+  it('applies the retry policy to later relay cycles', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-03-01T10:00:00Z'));
+    service.setBrokerFaultConfig({ mode: 'FULL_OUTAGE' });
+    await request(app).post('/api/outbox/retry-policy').send({ maxAttempts: 2, backoffBaseMs: 500 });
+
+    await request(app).post('/api/outbox/poll').send({});
+    const [waiting] = (await request(app).get('/api/outbox/events?status=PENDING')).body.data;
+    expect(waiting).toMatchObject({ retryCount: 1, availableAt: Date.now() + 500 });
+
+    vi.setSystemTime(Date.now() + 500);
+    const second = await request(app).post('/api/outbox/poll').send({});
+    expect(second.body.data).toMatchObject({ failedCount: 1, deadLetterCount: 1 });
+    expect((await request(app).get('/api/outbox/events?status=DEAD_LETTER')).body.data[0]).toMatchObject({ retryCount: 2 });
+  });
+
   it('serves a lease again only after it expires', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-03-01T10:00:00Z'));

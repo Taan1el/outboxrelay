@@ -9,12 +9,15 @@ import type {
   OutboxStats,
   PollCycleResult,
   RetryBatchResult,
+  RetryPolicy,
 } from '../../../shared/types.js';
 import {
   DEFAULT_BATCH_SIZE,
   DEFAULT_LEASE_SECONDS,
+  DEFAULT_RETRY_POLICY,
   PollOptionsError,
   applyFaultConfig,
+  applyRetryPolicy,
   buildOrderWithEvent,
 } from '../../../shared/outbox-logic.js';
 import { runRelayCycle } from '../../../shared/relay.js';
@@ -28,6 +31,7 @@ export class OutboxService {
     failureRatePercent: 0,
     simulatedLatencyMs: 30,
   };
+  private retryPolicy: RetryPolicy = { ...DEFAULT_RETRY_POLICY };
   private pollTimer: NodeJS.Timeout | null = null;
   private isPolling = false;
 
@@ -88,6 +92,7 @@ export class OutboxService {
         now: () => performance.now(),
       },
       { batchSize: DEFAULT_BATCH_SIZE, leaseSeconds: DEFAULT_LEASE_SECONDS },
+      this.retryPolicy,
     );
   }
 
@@ -104,6 +109,19 @@ export class OutboxService {
     return this.brokerFaultConfig;
   }
 
+  public getRetryPolicy(): RetryPolicy {
+    return { ...this.retryPolicy };
+  }
+
+  /**
+   * Changes how later failures are retried. Events already waiting keep their scheduled retry
+   * time; the new attempt limit and backoff apply from their next failure on.
+   */
+  public setRetryPolicy(patch: Partial<RetryPolicy>): RetryPolicy {
+    this.retryPolicy = applyRetryPolicy(this.retryPolicy, patch);
+    return this.getRetryPolicy();
+  }
+
   public getOrders(): Order[] {
     return this.db.getOrders();
   }
@@ -117,7 +135,7 @@ export class OutboxService {
   }
 
   public getStats(): OutboxStats {
-    return { ...this.db.getStats(), brokerMode: this.brokerFaultConfig.mode };
+    return { ...this.db.getStats(), brokerMode: this.brokerFaultConfig.mode, retryPolicy: this.getRetryPolicy() };
   }
 }
 

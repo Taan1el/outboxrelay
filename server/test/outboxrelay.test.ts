@@ -63,14 +63,15 @@ describe('OutboxDatabase & ACID Dual-Write Engine', () => {
   it('transitions to DEAD_LETTER when retry count reaches max retries', () => {
     const events = db.getOutboxEvents();
     const target = events[0];
+    const policy = { maxAttempts: 3, backoffBaseMs: 2000, backoffMaxMs: 60000 };
 
-    const fail1 = db.markEventFailed(target.id, 'Timeout error 1', 3);
+    const fail1 = db.markEventFailed(target.id, 'Timeout error 1', policy);
     expect(fail1.status).toBe('PENDING');
 
-    const fail2 = db.markEventFailed(target.id, 'Timeout error 2', 3);
+    const fail2 = db.markEventFailed(target.id, 'Timeout error 2', policy);
     expect(fail2.status).toBe('PENDING');
 
-    const fail3 = db.markEventFailed(target.id, 'Timeout error 3', 3);
+    const fail3 = db.markEventFailed(target.id, 'Timeout error 3', policy);
     expect(fail3.status).toBe('DEAD_LETTER');
 
     const dlEvents = db.getOutboxEvents('DEAD_LETTER');
