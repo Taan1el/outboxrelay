@@ -622,6 +622,12 @@ textarea {
   justify-content: flex-end;
 }
 
+.policy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .result-list {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

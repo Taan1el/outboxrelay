@@ -23,11 +23,11 @@ More screenshots: [the dead-letter lane and the lower panels](docs/screenshots/0
 - **Atomic write.** The order row and its outbox row are inserted in one SQLite transaction (`BEGIN IMMEDIATE`); if either insert fails, neither is stored.
 - **Unique order identity.** Server-created orders and their outbox events use UUID-based IDs, so concurrent requests do not depend on clock or `Math.random()` values for uniqueness.
 - **Row leasing.** A poller sets due rows to `LEASED` with a `leased_until` time. A lease that expires without an outcome makes the row due again.
-- **Retries with backoff.** By default a failed delivery is retried after 2 seconds, then 4 seconds, and the third failed attempt moves the event to `DEAD_LETTER`. The attempt limit, first delay and delay cap form a retry policy that can be changed while the relay runs (`POST /api/outbox/retry-policy`).
+- **Retries with backoff.** By default a failed delivery is retried after 2 seconds, then 4 seconds, and the third failed attempt moves the event to `DEAD_LETTER`. The attempt limit, first delay and delay cap form a retry policy that can be changed while the relay runs (`POST /api/outbox/retry-policy`). A changed policy is saved in SQLite and survives a restart; the `RETRY_*` environment variables set the policy a server starts with until one is saved.
 - **Dead-letter queue.** Dead-lettered events keep their last error and can be replayed, which resets their attempts.
 - **Consumer inbox.** Each consumer records `(event id, consumer)` once. SQLite records or counts a repeated delivery in one atomic statement, including when relay workers use separate connections. A repeated delivery is counted and ignored.
   Receipt IDs are opaque: SQLite uses UUIDs, while the browser store allocates sequential IDs without reusing seeded receipt IDs. Existing receipt IDs remain unchanged.
-- **Fault simulator.** Switch the broker between healthy, partial failures (half of the deliveries fail) and full outage, and set the delivery latency. A retry policy form next to it changes the attempt limit, the first retry delay and the longest delay; the retry schedule text and the attempt counts on every row follow the saved policy.
+- **Fault simulator.** Switch the broker between healthy, partial failures (half of the deliveries fail) and full outage, and set the delivery latency. A retry policy form next to it changes the attempt limit, the first retry delay and the longest delay; the retry schedule text and the attempt counts on every row follow the saved policy, and "Use default policy" drops the saved policy.
 - **Dead-letter inspector.** Load the dead-letter lane or a JSON or CSV export, see the events grouped by their last error, pick groups and replay them in one step after a confirmation, or export their ids. See [Inspecting dead letters](#inspecting-dead-letters).
 - **Browser demo** for GitHub Pages with a demo bar and a reset control.
 
@@ -77,7 +77,12 @@ No variable is required for the defaults above.
 | `PORT` | server | `4003` | Port the Express server listens on. See `server/.env.example`. |
 | `OUTBOXRELAY_DB_PATH` | server | `data/outbox.db` at the repository root | SQLite database file. |
 | `POLL_INTERVAL_MS` | server | `2500` | Whole milliseconds between automatic relay cycles (100 to 2,147,483,647); invalid values use the default. |
+| `RETRY_MAX_ATTEMPTS` | server | `3` | Failed attempts before an event is dead-lettered (1 to 10). |
+| `RETRY_BACKOFF_BASE_MS` | server | `2000` | Delay before the first retry in milliseconds (100 to 60,000); it doubles after each failure. |
+| `RETRY_BACKOFF_MAX_MS` | server | `60000` | Longest retry delay in milliseconds (100 to 600,000, at least `RETRY_BACKOFF_BASE_MS`). |
 | `VITE_API_TARGET` | client (dev only) | `http://localhost:4003` | Where the Vite dev server proxies `/api`. See `client/.env.example`. |
+
+The three `RETRY_*` variables are the starting policy. A policy saved through the API or the console takes precedence over them after a restart, until it is removed with `DELETE /api/outbox/retry-policy`. A `RETRY_*` value outside its range stops the server at startup with a message that names the variable.
 
 The server does not load `.env` files itself; export the variables or start Node with `--env-file`.
 
@@ -147,7 +152,8 @@ All responses are `{ "success": true, "data": ... }` or `{ "success": false, "er
 | `POST` | `/api/outbox/events/:id/retry` | Replay a dead-lettered event (`404` if it is not dead-lettered) |
 | `POST` | `/api/outbox/dead-letters/retry` | Replay a batch of dead-lettered events in one transaction; returns `{ retried, skipped }` |
 | `GET` | `/api/outbox/retry-policy` | The current retry policy: `{ maxAttempts, backoffBaseMs, backoffMaxMs }` |
-| `POST` | `/api/outbox/retry-policy` | Change the retry policy for later failures; returns the full policy |
+| `POST` | `/api/outbox/retry-policy` | Change the retry policy for later failures and save it; returns the full policy |
+| `DELETE` | `/api/outbox/retry-policy` | Remove the saved policy and go back to the startup policy (environment or built in); returns it |
 | `GET` | `/api/consumer/inbox` | The 50 most recent consumer inbox entries |
 | `POST` | `/api/broker/fault-config` | Set the simulated broker state |
 
@@ -156,7 +162,7 @@ Request bodies:
 - `POST /api/orders`: `{ "customerId": "cust_1", "items": [{ "name": "Pack", "quantity": 2, "unitPriceEur": 12.5 }], "currency": "EUR" }`. `quantity` is an integer from 1 to 1000, `unitPriceEur` a number from 0 to 1,000,000, `currency` an optional three-letter uppercase code.
 - `POST /api/outbox/poll`: optional `batchSize` (integer 1 to 100, default 10) and `leaseSeconds` (integer 1 to 300, default 5).
 - `POST /api/outbox/dead-letters/retry`: `{ "ids": ["evt_1", "evt_2"] }`, 1 to 500 non-empty ids of up to 100 characters; repeated ids count once. The response lists the ids reset to pending under `retried` and the ids that were missing or not dead-lettered under `skipped`, in request order.
-- `POST /api/outbox/retry-policy`: any of `maxAttempts` (integer 1 to 10), `backoffBaseMs` (integer 100 to 60,000) and `backoffMaxMs` (integer 100 to 600,000); at least one is required, other fields are rejected, and after merging with the current policy `backoffMaxMs` must be at least `backoffBaseMs`. Omitted fields keep their value. The browser demo follows the same rules.
+- `POST /api/outbox/retry-policy`: any of `maxAttempts` (integer 1 to 10), `backoffBaseMs` (integer 100 to 60,000) and `backoffMaxMs` (integer 100 to 600,000); at least one is required, other fields are rejected, and after merging with the current policy `backoffMaxMs` must be at least `backoffBaseMs`. Omitted fields keep their value. A rejected policy is neither applied nor saved. The browser demo follows the same rules and keeps its policy until the sample data is reset.
 - `POST /api/broker/fault-config`: optional `mode` (`HEALTHY`, `PARTIAL_FAILURES`, `FULL_OUTAGE`), `failureRatePercent` (0 to 100) and `simulatedLatencyMs` (0 to 5000). In partial-failure mode, a rate-only patch changes the delivery failure probability; omitted rates retain their current value, including when resubmitting the same mode. Entering partial-failure mode from another mode defaults to 50 unless a rate is supplied. Healthy and full-outage modes always use 0 and 100 respectively, regardless of a supplied rate. Omitted latency is preserved. The browser demo follows the same rules.
 
 The API has no authentication.
@@ -190,7 +196,7 @@ The image builds the server and the client, runs as the unprivileged `node` user
 - SQLite is a single file. The outbox here suits one node; it is not a distributed outbox, and a shared file on a network filesystem is not supported.
 - Leases and backoff use the wall clock, so a large clock change on the host shifts them.
 - Events whose retries are exhausted wait in the dead-letter queue until someone replays them.
-- The retry policy and the broker fault settings live in server memory and go back to their defaults when the server restarts. One policy applies to every event; with a single event type there is nothing to vary it by yet.
+- The broker fault settings live in server memory and go back to healthy when the server restarts; the retry policy is saved in the `settings` table. One policy applies to every event; with a single event type there is nothing to vary it by yet.
 - Consumer inbox rows and published outbox rows are never pruned.
 - The console polls the API every 2.5 seconds; it does not use push updates.
 - No performance figures are claimed. The project has not been benchmarked.
@@ -202,7 +208,7 @@ The image builds the server and the client, runs as the unprivileged `node` user
 - Pruning for published rows and consumer inbox entries.
 - Authentication for the API.
 - Metrics for cycle duration and queue age.
-- Keep the retry policy across restarts (environment variables or a settings table), and allow one policy per event type once there is more than one event type.
+- One retry policy per event type once there is more than one event type.
 
 ## License
 

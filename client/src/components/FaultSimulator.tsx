@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { BrokerFaultConfig, OutboxEvent, PollCycleResult, RetryPolicy } from '../../../shared/types.js';
 import { RETRY_POLICY_LIMITS, retrySchedule } from '../../../shared/outbox-logic.js';
-import { updateBrokerFault, updateRetryPolicy } from '../services/index.js';
+import { resetRetryPolicy, updateBrokerFault, updateRetryPolicy } from '../services/index.js';
 import { formatClock } from '../utils/format.js';
 
 type Mode = BrokerFaultConfig['mode'];
@@ -82,6 +82,21 @@ export const FaultSimulator: React.FC<FaultSimulatorProps> = ({ currentMode, las
       onConfigChanged();
     } catch (err) {
       setPolicyMessage({ text: err instanceof Error ? err.message : 'The retry policy could not be changed', failed: true });
+    } finally {
+      setIsSavingPolicy(false);
+    }
+  };
+
+  const handlePolicyReset = async () => {
+    setIsSavingPolicy(true);
+    setPolicyMessage(null);
+    try {
+      const restored = await resetRetryPolicy();
+      const attempts = restored.maxAttempts === 1 ? '1 attempt' : `${restored.maxAttempts} attempts`;
+      setPolicyMessage({ text: `Default retry policy restored: ${attempts} before dead letter.`, failed: false });
+      onConfigChanged();
+    } catch (err) {
+      setPolicyMessage({ text: err instanceof Error ? err.message : 'The retry policy could not be reset', failed: true });
     } finally {
       setIsSavingPolicy(false);
     }
@@ -179,9 +194,14 @@ export const FaultSimulator: React.FC<FaultSimulatorProps> = ({ currentMode, las
               </div>
             ))}
           </div>
-          <button type="submit" className="btn btn-secondary" disabled={isSavingPolicy}>
-            {isSavingPolicy ? 'Saving' : 'Apply retry policy'}
-          </button>
+          <div className="policy-actions">
+            <button type="submit" className="btn btn-secondary" disabled={isSavingPolicy}>
+              {isSavingPolicy ? 'Saving' : 'Apply retry policy'}
+            </button>
+            <button type="button" className="btn btn-secondary" disabled={isSavingPolicy} onClick={handlePolicyReset}>
+              Use default policy
+            </button>
+          </div>
           <output className="form-result">
             {policyMessage && <span className={policyMessage.failed ? 'text-bad' : undefined}>{policyMessage.text}</span>}
           </output>

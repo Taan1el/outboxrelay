@@ -80,6 +80,10 @@ function installFetch() {
       mockStats.retryPolicy = { ...mockStats.retryPolicy, ...body };
       return ok(mockStats.retryPolicy);
     }
+    if (url.endsWith('/outbox/retry-policy') && method === 'DELETE') {
+      mockStats.retryPolicy = { maxAttempts: 3, backoffBaseMs: 2000, backoffMaxMs: 60000 };
+      return ok(mockStats.retryPolicy);
+    }
     if (url.includes('/outbox/events?status=DEAD_LETTER')) return ok(mockEvents.filter((e) => e.status === 'DEAD_LETTER'));
     if (url.includes('/retry')) return { ok: true, json: async () => ({ success: true }) };
     if (url.includes('/outbox/events')) return ok(mockEvents);
@@ -231,6 +235,21 @@ describe('OutboxRelay operations console', () => {
     expect(await screen.findByText(/Retry policy saved: 4 attempts before dead letter/)).toBeInTheDocument();
     expect(await screen.findByText(/retried after 0\.5 s, 1 s, 2 s \(starting at 0\.5 s/)).toBeInTheDocument();
     expect(screen.getAllByText(/^1 of 4 attempts/).length).toBeGreaterThan(0);
+  });
+
+  it('restores the default retry policy', async () => {
+    mockStats.retryPolicy = { maxAttempts: 5, backoffBaseMs: 1000, backoffMaxMs: 30000 };
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText('98.3%');
+    expect(screen.getByLabelText('Attempt limit')).toHaveValue(5);
+
+    await user.click(screen.getByRole('button', { name: 'Use default policy' }));
+    await waitFor(() => expect(calledWith('DELETE', '/outbox/retry-policy')).toHaveLength(1));
+    expect(await screen.findByText('Default retry policy restored: 3 attempts before dead letter.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('Attempt limit')).toHaveValue(3));
+    expect(screen.getByLabelText('First retry delay (ms)')).toHaveValue(2000);
+    expect(screen.getByText(/retried after 2 s, 4 s/)).toBeInTheDocument();
   });
 
   it('reports a rejected retry policy and keeps the saved one', async () => {
