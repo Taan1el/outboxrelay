@@ -242,7 +242,8 @@ describe('OutboxRelay operations console', () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText('98.3%');
-    expect(screen.getByLabelText('Attempt limit')).toHaveValue(5);
+    // The form follows the loaded policy in an effect after the stats arrive.
+    await waitFor(() => expect(screen.getByLabelText('Attempt limit')).toHaveValue(5));
 
     await user.click(screen.getByRole('button', { name: 'Use default policy' }));
     await waitFor(() => expect(calledWith('DELETE', '/outbox/retry-policy')).toHaveLength(1));
