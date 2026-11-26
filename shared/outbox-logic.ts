@@ -183,6 +183,56 @@ export function applyRetryPolicy(current: RetryPolicy, patch: Partial<RetryPolic
   return next;
 }
 
+/** Environment variables that set the retry policy a server starts with. */
+export const RETRY_POLICY_ENV = {
+  maxAttempts: 'RETRY_MAX_ATTEMPTS',
+  backoffBaseMs: 'RETRY_BACKOFF_BASE_MS',
+  backoffMaxMs: 'RETRY_BACKOFF_MAX_MS',
+} as const satisfies Record<keyof RetryPolicy, string>;
+
+/**
+ * The starting retry policy from the environment. Unset or empty variables keep the built-in
+ * default. A value that is not an integer within the API limits throws, naming the variable,
+ * so a typo stops the server instead of quietly running with a different policy.
+ */
+export function retryPolicyFromEnv(env: Record<string, string | undefined>): RetryPolicy {
+  const patch: Partial<RetryPolicy> = {};
+  for (const field of Object.keys(RETRY_POLICY_ENV) as Array<keyof RetryPolicy>) {
+    const name = RETRY_POLICY_ENV[field];
+    const raw = env[name]?.trim();
+    if (!raw) continue;
+    const { min, max } = RETRY_POLICY_LIMITS[field];
+    const value = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+    if (!Number.isSafeInteger(value) || value < min || value > max) {
+      throw new ValidationError(`${name} must be an integer between ${min} and ${max}, got "${raw}"`);
+    }
+    patch[field] = value;
+  }
+  try {
+    return applyRetryPolicy(DEFAULT_RETRY_POLICY, patch);
+  } catch {
+    const next = { ...DEFAULT_RETRY_POLICY, ...patch };
+    throw new ValidationError(
+      `${RETRY_POLICY_ENV.backoffMaxMs} (${next.backoffMaxMs}) must be at least ${RETRY_POLICY_ENV.backoffBaseMs} (${next.backoffBaseMs})`,
+    );
+  }
+}
+
+/**
+ * Reads a retry policy saved earlier. Returns null when the stored value is not a complete,
+ * valid policy (for example after the limits changed), so the caller falls back to its default.
+ */
+export function parseStoredRetryPolicy(json: string): RetryPolicy | null {
+  try {
+    const value: unknown = JSON.parse(json);
+    const patch = validateRetryPolicy(value);
+    if (Object.keys(patch).length !== Object.keys(RETRY_POLICY_LIMITS).length) return null;
+    return applyRetryPolicy(DEFAULT_RETRY_POLICY, patch);
+  } catch {
+    return null;
+  }
+}
+
 export function validateOrderPayload(body: unknown): CreateOrderPayload {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     throw new ValidationError('Order must be a JSON object');

@@ -14,11 +14,11 @@ import type {
 import {
   DEFAULT_BATCH_SIZE,
   DEFAULT_LEASE_SECONDS,
-  DEFAULT_RETRY_POLICY,
   PollOptionsError,
   applyFaultConfig,
   applyRetryPolicy,
   buildOrderWithEvent,
+  retryPolicyFromEnv,
 } from '../../../shared/outbox-logic.js';
 import { runRelayCycle } from '../../../shared/relay.js';
 
@@ -31,12 +31,16 @@ export class OutboxService {
     failureRatePercent: 0,
     simulatedLatencyMs: 30,
   };
-  private retryPolicy: RetryPolicy = { ...DEFAULT_RETRY_POLICY };
+  /** The policy used when none is saved: from the RETRY_* environment variables or built in. */
+  private startupRetryPolicy: RetryPolicy;
+  private retryPolicy: RetryPolicy;
   private pollTimer: NodeJS.Timeout | null = null;
   private isPolling = false;
 
-  constructor(db?: OutboxDatabase, autoStart: boolean = true) {
+  constructor(db?: OutboxDatabase, autoStart: boolean = true, env: Record<string, string | undefined> = process.env) {
     this.db = db || new OutboxDatabase();
+    this.startupRetryPolicy = retryPolicyFromEnv(env);
+    this.retryPolicy = this.db.getSavedRetryPolicy() ?? { ...this.startupRetryPolicy };
     if (autoStart) this.startBackgroundPoller(pollIntervalFromEnv(process.env.POLL_INTERVAL_MS));
   }
 
@@ -115,10 +119,20 @@ export class OutboxService {
 
   /**
    * Changes how later failures are retried. Events already waiting keep their scheduled retry
-   * time; the new attempt limit and backoff apply from their next failure on.
+   * time; the new attempt limit and backoff apply from their next failure on. The policy is
+   * saved in the database, so a restart keeps it.
    */
   public setRetryPolicy(patch: Partial<RetryPolicy>): RetryPolicy {
-    this.retryPolicy = applyRetryPolicy(this.retryPolicy, patch);
+    const next = applyRetryPolicy(this.retryPolicy, patch);
+    this.db.saveRetryPolicy(next);
+    this.retryPolicy = next;
+    return this.getRetryPolicy();
+  }
+
+  /** Forgets the saved policy and goes back to the startup default (environment or built in). */
+  public resetRetryPolicy(): RetryPolicy {
+    this.db.clearSavedRetryPolicy();
+    this.retryPolicy = { ...this.startupRetryPolicy };
     return this.getRetryPolicy();
   }
 

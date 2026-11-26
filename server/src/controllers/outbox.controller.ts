@@ -124,6 +124,14 @@ export class OutboxController {
     }
   };
 
+  public resetRetryPolicy = async (_req: Request, res: Response) => {
+    try {
+      res.json({ success: true, data: this.outboxService.resetRetryPolicy() });
+    } catch (err) {
+      fail(res, err);
+    }
+  };
+
   public setBrokerFaultConfig = async (req: Request, res: Response) => {
     try {
       const patch = validateFaultConfig(req.body);

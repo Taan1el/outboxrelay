@@ -3,8 +3,10 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
 import type { ConsumerInboxItem, ConsumerStats, Order, OutboxEvent, OutboxStats, RetryBatchResult, RetryPolicy } from '../../../shared/types.js';
-import { CONSUMER_IDS, DEFAULT_RETRY_POLICY, deliverySuccessRate, planFailure } from '../../../shared/outbox-logic.js';
+import { CONSUMER_IDS, DEFAULT_RETRY_POLICY, deliverySuccessRate, parseStoredRetryPolicy, planFailure } from '../../../shared/outbox-logic.js';
 import { defaultDatabasePath } from '../lib/repoPaths.js';
+
+const RETRY_POLICY_KEY = 'retry_policy';
 
 const RETRY_DEAD_LETTER_SQL = `
   UPDATE outbox_events
@@ -68,6 +70,12 @@ export class OutboxDatabase {
         processed_at TEXT NOT NULL,
         duplicate_detected INTEGER NOT NULL DEFAULT 0,
         UNIQUE(event_id, consumer_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
     `);
 
@@ -415,6 +423,32 @@ export class OutboxDatabase {
       deliverySuccessRate: deliverySuccessRate(publishedEvents, deadLetterEvents),
       consumers,
     };
+  }
+
+  /** The retry policy saved by the last change, or null when none is saved or it is no longer valid. */
+  public getSavedRetryPolicy(): RetryPolicy | null {
+    const row = this.db.prepare('SELECT value_json FROM settings WHERE key = ?').get(RETRY_POLICY_KEY) as
+      | { value_json: string }
+      | undefined;
+    return row ? parseStoredRetryPolicy(row.value_json) : null;
+  }
+
+  public saveRetryPolicy(policy: RetryPolicy): void {
+    const value = JSON.stringify({
+      maxAttempts: policy.maxAttempts,
+      backoffBaseMs: policy.backoffBaseMs,
+      backoffMaxMs: policy.backoffMaxMs,
+    });
+    this.db
+      .prepare(
+        `INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+      )
+      .run(RETRY_POLICY_KEY, value, new Date().toISOString());
+  }
+
+  public clearSavedRetryPolicy(): void {
+    this.db.prepare('DELETE FROM settings WHERE key = ?').run(RETRY_POLICY_KEY);
   }
 
   public close(): void {

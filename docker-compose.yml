@@ -9,6 +9,10 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4003
+      # Starting retry policy; a policy saved from the console is kept in the data volume.
+      # - RETRY_MAX_ATTEMPTS=3
+      # - RETRY_BACKOFF_BASE_MS=2000
+      # - RETRY_BACKOFF_MAX_MS=60000
     volumes:
       - outboxrelay-data:/app/data
     restart: unless-stopped

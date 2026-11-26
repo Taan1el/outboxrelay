@@ -131,6 +131,12 @@ describe('browser demo API', () => {
     expect((await demo.fetchStats()).retryPolicy.maxAttempts).toBe(3);
   });
 
+  it('restores the built-in retry policy on request', async () => {
+    await demo.updateRetryPolicy({ maxAttempts: 6, backoffBaseMs: 500, backoffMaxMs: 4000 });
+    expect(await demo.resetRetryPolicy()).toEqual({ maxAttempts: 3, backoffBaseMs: 2000, backoffMaxMs: 60000 });
+    expect((await demo.fetchStats()).retryPolicy).toEqual({ maxAttempts: 3, backoffBaseMs: 2000, backoffMaxMs: 60000 });
+  });
+
   it('repeats the same partial-failure outcomes after a reset', async () => {
     const outcome = async () => {
       demo.resetDemoData();

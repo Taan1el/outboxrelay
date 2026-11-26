@@ -117,6 +117,12 @@ export async function updateRetryPolicy(patch: Partial<RetryPolicy>): Promise<Re
   return { ...engine.retryPolicy };
 }
 
+/** The demo has no environment, so the default is always the built-in policy. */
+export async function resetRetryPolicy(): Promise<RetryPolicy> {
+  engine.retryPolicy = { ...DEFAULT_RETRY_POLICY };
+  return { ...engine.retryPolicy };
+}
+
 export async function fetchConsumerInbox(): Promise<ConsumerInboxItem[]> {
   return engine.store.getConsumerInbox();
 }

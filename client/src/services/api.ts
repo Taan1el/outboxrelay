@@ -55,6 +55,9 @@ export const retryDeadLetters = (ids: string[]): Promise<RetryBatchResult> =>
 export const updateRetryPolicy = (patch: Partial<RetryPolicy>): Promise<RetryPolicy> =>
   request('/outbox/retry-policy', jsonPost(patch), 'Failed to update retry policy');
 
+export const resetRetryPolicy = (): Promise<RetryPolicy> =>
+  request('/outbox/retry-policy', { method: 'DELETE' }, 'Failed to reset retry policy');
+
 export const fetchConsumerInbox = (): Promise<ConsumerInboxItem[]> =>
   request('/consumer/inbox', undefined, 'Failed to fetch consumer inbox');
 
